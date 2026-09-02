@@ -348,8 +348,18 @@ function renderAdmin(){
       <div style="margin-top:14px;"><button class="auto" id="btnPush">Enviar para a planilha</button></div>
       <div id="pushMsg"></div>
     </div>
+
+    <div class="card">
+      <h2>3. Ver contracheques dos colaboradores</h2>
+      <p class="hint">Escolha um colaborador pra ver os contracheques dele (últimos 12 meses), do mesmo jeito que ele vê.</p>
+      <div class="row">
+        <div><label>Colaborador</label><select id="empSelect"><option value="">Carregando...</option></select></div>
+      </div>
+      <div id="adminSlipArea"></div>
+    </div>
   `;
   document.getElementById('btnAdminExit').onclick = () => { mode='login'; renderAuth(); };
+  loadEmployeeList();
 
   document.getElementById('period').oninput = (e) => { draft.period = e.target.value.trim(); if(draft.headers.length) updateSummary(); };
 
@@ -396,6 +406,70 @@ function renderAdmin(){
     msg.innerHTML = `<div class="ok">${parsed.rows.length} linha(s) lida(s).</div>`;
     renderReview();
   };
+}
+
+async function loadEmployeeList(){
+  const sel = document.getElementById('empSelect');
+  try{
+    const res = await callApi('admin_list_employees', { secret: adminSecret });
+    if(!res.ok) throw new Error(res.error);
+    sel.innerHTML = '<option value="">Selecione...</option>' + res.employees.map(e => `<option value="${e.cpf}">${escapeHtml(e.nome)}</option>`).join('');
+    sel.onchange = () => loadEmployeePayslip(sel.value);
+  }catch(e){
+    sel.innerHTML = '<option value="">Erro ao carregar</option>';
+    document.getElementById('adminSlipArea').innerHTML = `<div class="error">${escapeHtml(e.message||e)}</div>`;
+  }
+}
+
+async function loadEmployeePayslip(cpf){
+  const area = document.getElementById('adminSlipArea');
+  if(!cpf){ area.innerHTML=''; return; }
+  area.innerHTML = '<p class="muted">carregando...</p>';
+  try{
+    const res = await callApi('admin_payslip', { secret: adminSecret, cpf });
+    if(!res.ok) throw new Error(res.error);
+    renderAdminSlip(res, res.periods[0] ? res.periods[0].id : null);
+  }catch(e){
+    area.innerHTML = `<div class="error">${escapeHtml(e.message||e)}</div>`;
+  }
+}
+
+function renderAdminSlip(data, selectedPeriodId){
+  const area = document.getElementById('adminSlipArea');
+  const opts = data.periods.map(p => `<option value="${p.id}" ${p.id===selectedPeriodId?'selected':''}>${escapeHtml(p.label)}</option>`).join('');
+  const lines = data.lines.filter(l => l.period_id === selectedPeriodId);
+  const proventos = lines.filter(l=>l.tipo==='provento');
+  const descontos = lines.filter(l=>l.tipo==='desconto');
+  const totalP = proventos.reduce((a,l)=>a+Number(l.valor),0);
+  const totalD = descontos.reduce((a,l)=>a+Number(l.valor),0);
+  const periodLabel = (data.periods.find(p=>p.id===selectedPeriodId)||{}).label || '';
+
+  area.innerHTML = data.periods.length ? `
+    <select class="period" id="adminPeriodSelect">${opts}</select>
+    <div class="slip">
+      <div class="slip-head">
+        <div class="co">${escapeHtml(COMPANY_NAME)}</div>
+        <div class="period">RECIBO DE PAGAMENTO<br>${escapeHtml(periodLabel)}</div>
+      </div>
+      <div class="slip-who"><div class="name">${escapeHtml(data.nome)}</div></div>
+      <div class="cols">
+        <div>
+          <div class="col-title">PROVENTOS</div>
+          ${proventos.map(l=>`<div class="line-item"><span>${escapeHtml(l.descricao)}</span><span class="v pos num">${fmtBRL(Number(l.valor))}</span></div>`).join('') || '<div class="line-item"><span>—</span><span></span></div>'}
+          <div class="subtotal"><span>Total de proventos</span><span class="num">${fmtBRL(totalP)}</span></div>
+        </div>
+        <div>
+          <div class="col-title">DESCONTOS</div>
+          ${descontos.map(l=>`<div class="line-item"><span>${escapeHtml(l.descricao)}</span><span class="v neg num">${fmtBRL(Number(l.valor))}</span></div>`).join('') || '<div class="line-item"><span>—</span><span></span></div>'}
+          <div class="subtotal"><span>Total de descontos</span><span class="num">${fmtBRL(totalD)}</span></div>
+        </div>
+      </div>
+      <div class="liquido"><span>LÍQUIDO A RECEBER</span><span class="amt">R$ ${fmtBRL(totalP-totalD)}</span></div>
+    </div>
+  ` : '<p class="sub" style="text-align:left">Nenhum contracheque disponível ainda pra esse colaborador.</p>';
+
+  const sel = document.getElementById('adminPeriodSelect');
+  if(sel) sel.onchange = e => renderAdminSlip(data, e.target.value);
 }
 
 function renderReview(){
