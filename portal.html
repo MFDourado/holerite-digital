@@ -325,7 +325,18 @@ function renderAdmin(){
     </div>
 
     <div class="card">
-      <h2>1. Enviar a folha do mês</h2>
+      <h2>1. Cadastrar colaborador (opcional, antes da folha)</h2>
+      <p class="hint">Use isso pra liberar o "primeiro acesso" de alguém antes mesmo de você subir a folha do mês. O contracheque só aparece quando você enviar os dados dele — até lá, o login funciona normal, só mostra "nenhum contracheque disponível".</p>
+      <div class="row">
+        <div><label>Nome completo</label><input type="text" id="newEmpNome" placeholder="Ex: João da Silva"></div>
+        <div><label>CPF</label><input type="text" id="newEmpCpf" placeholder="000.000.000-00" maxlength="14"></div>
+      </div>
+      <button class="auto" id="btnAddEmp">Cadastrar colaborador</button>
+      <div id="addEmpMsg"></div>
+    </div>
+
+    <div class="card">
+      <h2>2. Enviar a folha do mês</h2>
       <p class="hint">Envie o PDF (tabela consolidada), Excel (.xlsx/.xls) ou CSV. Ou cole os dados direto do Excel/Sheets.</p>
       <div class="row">
         <div><label>Referência do período</label><input type="text" id="period" placeholder="Ex: Agosto/2026"></div>
@@ -338,7 +349,7 @@ function renderAdmin(){
     </div>
 
     <div class="card" id="cardReview" style="display:none;">
-      <h2>2. Conferência rápida</h2>
+      <h2>3. Conferência rápida</h2>
       <p class="hint">Classificação automática por dicionário (⚡). Colunas não reconhecidas caem pra IA (🤖) ou ficam marcadas pra revisar.</p>
       <table><tr><th>Coluna</th><th>Amostra</th><th>Classificação</th></tr><tbody id="colTableBody"></tbody></table>
       <div style="margin-top:14px;"><button class="ghost auto" id="btnAI">Classificar restantes com IA 🤖</button></div>
@@ -350,7 +361,7 @@ function renderAdmin(){
     </div>
 
     <div class="card">
-      <h2>3. Ver contracheques dos colaboradores</h2>
+      <h2>4. Ver contracheques dos colaboradores</h2>
       <p class="hint">Escolha um colaborador pra ver os contracheques dele (últimos 12 meses), do mesmo jeito que ele vê.</p>
       <div class="row">
         <div><label>Colaborador</label><select id="empSelect"><option value="">Carregando...</option></select></div>
@@ -359,6 +370,24 @@ function renderAdmin(){
     </div>
   `;
   document.getElementById('btnAdminExit').onclick = () => { mode='login'; renderAuth(); };
+
+  document.getElementById('btnAddEmp').onclick = async () => {
+    const nome = document.getElementById('newEmpNome').value.trim();
+    const cpf = onlyDigits(document.getElementById('newEmpCpf').value);
+    const msg = document.getElementById('addEmpMsg');
+    if(!nome || cpf.length!==11){ msg.innerHTML = '<div class="error">Preencha o nome e um CPF válido (11 dígitos).</div>'; return; }
+    msg.innerHTML = '<div class="muted">cadastrando...</div>';
+    try{
+      const res = await callApi('admin_add_employee', { secret: adminSecret, nome, cpf });
+      if(!res.ok) throw new Error(res.error);
+      msg.innerHTML = `<div class="ok">"${escapeHtml(nome)}" cadastrado(a) — já pode fazer o primeiro acesso pelo link do portal.</div>`;
+      document.getElementById('newEmpNome').value = '';
+      document.getElementById('newEmpCpf').value = '';
+    }catch(e){
+      msg.innerHTML = `<div class="error">${escapeHtml(e.message||e)}</div>`;
+    }
+  };
+
   loadEmployeeList();
 
   document.getElementById('period').oninput = (e) => { draft.period = e.target.value.trim(); if(draft.headers.length) updateSummary(); };
