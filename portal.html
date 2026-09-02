@@ -286,20 +286,39 @@ async function pdfToGrid(file){
     const ys = Object.keys(byY).map(Number).sort((a,b)=>b-a);
     ys.forEach(y => allLines.push(byY[y].sort((a,b)=>a.x-b.x)));
   }
-  if(allLines.length===0) return '';
-  let headerIdx = allLines.findIndex(row => row.some(it => normalize(it.text).includes('cpf')));
-  if(headerIdx === -1) headerIdx = 0;
-  const anchors = allLines[headerIdx].map(it => it.x);
-  function snap(row){
-    const cells = anchors.map(()=> []);
-    row.forEach(it => {
-      let best=0, bestDist=Infinity;
-      anchors.forEach((ax,i)=>{ const d=Math.abs(ax-it.x); if(d<bestDist){bestDist=d; best=i;} });
-      cells[best].push(it.text);
-    });
-    return cells.map(c=>c.join(' ').trim());
+  return allLines.map(row => row.map(it=>it.text).join(' ')).join('\n');
+}
+
+function arrayBufferToBase64(buf){
+  let binary = '';
+  const bytes = new Uint8Array(buf);
+  const chunk = 0x8000;
+  for(let i=0; i<bytes.length; i+=chunk){
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i+chunk));
   }
-  return allLines.map(snap).map(r => r.join('\t')).join('\n');
+  return btoa(binary);
+}
+
+async function extractPayrollFromPDF(file){
+  const buf = await file.arrayBuffer();
+  const base64 = arrayBufferToBase64(buf);
+  const prompt = `Esta é uma folha de pagamento ou holerite brasileiro (pode ter um ou vários funcionários). Extraia os dados e responda SOMENTE com um JSON válido, sem nenhum texto antes ou depois, no formato exato:
+{"periodo":"Agosto/2026","funcionarios":[{"nome":"NOME COMPLETO EM MAIÚSCULAS OU COMO APARECE","itens":[{"descricao":"Salário Base","tipo":"provento","valor":6000.00}]}]}
+Regras: "tipo" é "provento" para valores na coluna de vencimentos/proventos, "desconto" para valores na coluna de descontos. NÃO inclua linhas de total, base de cálculo, CBO, departamento, filial, código do funcionário. Use ponto como separador decimal (nunca vírgula) nos números do JSON. O campo "periodo" no formato "Mês/Ano" (ex: "Agosto/2026"), capturado do cabeçalho do documento (ex: "Agosto de 2026" vira "Agosto/2026"). Se houver mais de um funcionário no documento (várias páginas), inclua todos no array.`;
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      model:'claude-sonnet-4-6', max_tokens:4096,
+      messages:[{role:'user', content:[
+        {type:'document', source:{type:'base64', media_type:'application/pdf', data: base64}},
+        {type:'text', text: prompt}
+      ]}]
+    })
+  });
+  const data = await resp.json();
+  const text = (data.content||[]).filter(c=>c.type==='text').map(c=>c.text).join('');
+  const clean = text.replace(/```json|```/g,'').trim();
+  return JSON.parse(clean);
 }
 
 async function classifyWithAI(headers){
@@ -325,31 +344,45 @@ function renderAdmin(){
     </div>
 
     <div class="card">
-      <h2>1. Cadastrar colaborador (opcional, antes da folha)</h2>
-      <p class="hint">Use isso pra liberar o "primeiro acesso" de alguém antes mesmo de você subir a folha do mês. O contracheque só aparece quando você enviar os dados dele — até lá, o login funciona normal, só mostra "nenhum contracheque disponível".</p>
+      <h2>1. Cadastrar colaboradores</h2>
+      <p class="hint">Cadastro individual (nome + CPF) ou importação em massa colando uma lista. Isso libera o "primeiro acesso" antes mesmo da folha chegar, e é o que permite casar nome com CPF quando o holerite em PDF não traz o CPF.</p>
       <div class="row">
         <div><label>Nome completo</label><input type="text" id="newEmpNome" placeholder="Ex: João da Silva"></div>
         <div><label>CPF</label><input type="text" id="newEmpCpf" placeholder="000.000.000-00" maxlength="14"></div>
       </div>
       <button class="auto" id="btnAddEmp">Cadastrar colaborador</button>
       <div id="addEmpMsg"></div>
+      <hr style="border:none;border-top:1px solid var(--line-soft);margin:18px 0;">
+      <label>Importar lista (uma linha por pessoa — nome, e o CPF na última coluna; colunas do meio são ignoradas)</label>
+      <textarea id="bulkImportInput" placeholder="Nome Completo	usuario (opcional)	000.000.000-00"></textarea>
+      <div style="margin-top:14px;"><button class="ghost auto" id="btnBulkImport">Importar lista</button></div>
+      <div id="bulkImportMsg"></div>
     </div>
 
     <div class="card">
       <h2>2. Enviar a folha do mês</h2>
-      <p class="hint">Envie o PDF (tabela consolidada), Excel (.xlsx/.xls) ou CSV. Ou cole os dados direto do Excel/Sheets.</p>
+      <p class="hint">Envie o PDF (holerite individual ou tabela consolidada — a leitura é feita por IA, funciona mesmo em PDF "imagem" sem texto), Excel (.xlsx/.xls) ou CSV. Ou cole os dados direto do Excel/Sheets.</p>
       <div class="row">
-        <div><label>Referência do período</label><input type="text" id="period" placeholder="Ex: Agosto/2026"></div>
+        <div><label>Referência do período (só necessário pra Excel/CSV — o PDF detecta sozinho)</label><input type="text" id="period" placeholder="Ex: Agosto/2026"></div>
         <div><label>Arquivo (opcional)</label><input type="file" id="dataFile" accept="application/pdf,.xlsx,.xls,.csv"></div>
       </div>
-      <label>Dados (tabulados / colados do Excel — ou preenchidos automaticamente a partir do arquivo)</label>
+      <label>Dados (colados do Excel/Sheets, ou preenchidos automaticamente ao anexar .xlsx/.csv)</label>
       <textarea id="csvInput" placeholder="Nome	CPF	Salário Base	INSS	IRRF	Vale Transporte"></textarea>
       <div style="margin-top:14px;"><button class="auto" id="btnParse">Processar e classificar automaticamente</button></div>
       <div id="parseMsg"></div>
     </div>
 
+    <div class="card" id="cardReviewPdf" style="display:none;">
+      <h2>3. Conferência rápida (PDF lido por IA)</h2>
+      <p class="hint">Confira nome, CPF (preenchido sozinho quando bate com um colaborador já cadastrado — se não achar, digite manualmente) e os itens de cada holerite antes de enviar.</p>
+      <div class="row"><div><label>Período detectado</label><input type="text" id="pdfPeriodo"></div></div>
+      <div id="pdfEmployeesArea"></div>
+      <div style="margin-top:14px;"><button class="auto" id="btnPushPdf">Enviar para a planilha</button></div>
+      <div id="pushPdfMsg"></div>
+    </div>
+
     <div class="card" id="cardReview" style="display:none;">
-      <h2>3. Conferência rápida</h2>
+      <h2>4. Conferência rápida (Excel/CSV)</h2>
       <p class="hint">Classificação automática por dicionário (⚡). Colunas não reconhecidas caem pra IA (🤖) ou ficam marcadas pra revisar.</p>
       <table><tr><th>Coluna</th><th>Amostra</th><th>Classificação</th></tr><tbody id="colTableBody"></tbody></table>
       <div style="margin-top:14px;"><button class="ghost auto" id="btnAI">Classificar restantes com IA 🤖</button></div>
@@ -361,7 +394,7 @@ function renderAdmin(){
     </div>
 
     <div class="card">
-      <h2>4. Ver contracheques dos colaboradores</h2>
+      <h2>5. Ver contracheques dos colaboradores</h2>
       <p class="hint">Escolha um colaborador pra ver os contracheques dele (últimos 12 meses), do mesmo jeito que ele vê.</p>
       <div class="row">
         <div><label>Colaborador</label><select id="empSelect"><option value="">Carregando...</option></select></div>
@@ -388,6 +421,49 @@ function renderAdmin(){
     }
   };
 
+  document.getElementById('btnPushPdf').onclick = async () => {
+    const msg = document.getElementById('pushPdfMsg');
+    const periodo = document.getElementById('pdfPeriodo').value.trim();
+    if(!periodo){ msg.innerHTML = '<div class="error">Preencha o período detectado (ou corrija manualmente).</div>'; return; }
+    const semCpf = draft.pdfFuncionarios.filter(f => onlyDigits(f.cpf).length !== 11);
+    if(semCpf.length){ msg.innerHTML = `<div class="error">Falta CPF válido pra: ${semCpf.map(f=>escapeHtml(f.nome)).join(', ')}.</div>`; return; }
+    msg.innerHTML = '<div class="muted">enviando...</div>';
+    try{
+      const rows = draft.pdfFuncionarios.map(f => ({
+        cpf: onlyDigits(f.cpf), nome: f.nome,
+        items: f.itens.filter(i => i.valor !== 0)
+      }));
+      const res = await callApi('admin_push', { secret: adminSecret, period_label: periodo, rows });
+      if(!res.ok) throw new Error(res.error);
+      msg.innerHTML = `<div class="ok">Período "${escapeHtml(periodo)}" enviado — ${res.count} colaborador(es) processado(s).</div>`;
+    }catch(e){
+      msg.innerHTML = `<div class="error">Erro ao enviar: ${escapeHtml(e.message||e)}</div>`;
+    }
+  };
+
+  document.getElementById('btnBulkImport').onclick = async () => {
+    const text = document.getElementById('bulkImportInput').value;
+    const msg = document.getElementById('bulkImportMsg');
+    const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(l=>l.length>0);
+    if(lines.length===0){ msg.innerHTML = '<div class="error">Cole ao menos uma linha.</div>'; return; }
+    const employees = lines.map(line => {
+      const cells = line.split('\t').map(c=>c.trim());
+      const nome = cells[0];
+      const cpf = onlyDigits(cells[cells.length-1]);
+      return {nome, cpf};
+    }).filter(e => e.nome && e.cpf.length===11);
+    if(employees.length===0){ msg.innerHTML = '<div class="error">Não consegui reconhecer nome/CPF nas linhas coladas. Confira se está separado por tabulação (copiado direto do Excel/Sheets).</div>'; return; }
+    msg.innerHTML = '<div class="muted">importando...</div>';
+    try{
+      const res = await callApi('admin_bulk_add_employees', { secret: adminSecret, employees });
+      if(!res.ok) throw new Error(res.error);
+      msg.innerHTML = `<div class="ok">${res.added} cadastrado(s), ${res.skipped} ignorado(s) (já existiam ou CPF inválido).</div>`;
+      document.getElementById('bulkImportInput').value = '';
+    }catch(e){
+      msg.innerHTML = `<div class="error">${escapeHtml(e.message||e)}</div>`;
+    }
+  };
+
   loadEmployeeList();
 
   document.getElementById('period').oninput = (e) => { draft.period = e.target.value.trim(); if(draft.headers.length) updateSummary(); };
@@ -399,10 +475,13 @@ function renderAdmin(){
     const name = file.name.toLowerCase();
     try{
       if(name.endsWith('.pdf')){
-        msg.innerHTML = '<div class="muted">lendo pdf...</div>';
-        document.getElementById('csvInput').value = await pdfToGrid(file);
-        msg.innerHTML = '<div class="ok">Texto extraído do PDF. Confira antes de processar.</div>';
+        document.getElementById('cardReview').style.display = 'none';
+        msg.innerHTML = '<div class="muted">lendo pdf com IA (pode levar alguns segundos)...</div>';
+        const result = await extractPayrollFromPDF(file);
+        await renderPdfReview(result);
+        msg.innerHTML = '<div class="ok">PDF lido. Confira a seção 3 abaixo antes de enviar.</div>';
       } else if(name.endsWith('.xlsx') || name.endsWith('.xls')){
+        document.getElementById('cardReviewPdf').style.display = 'none';
         msg.innerHTML = '<div class="muted">lendo planilha...</div>';
         const buf = await file.arrayBuffer();
         const wb = XLSX.read(buf, {type:'array'});
@@ -410,6 +489,7 @@ function renderAdmin(){
         document.getElementById('csvInput').value = XLSX.utils.sheet_to_csv(sheet, {FS: '\t'});
         msg.innerHTML = `<div class="ok">Planilha lida (aba "${escapeHtml(wb.SheetNames[0])}"). Confira antes de processar.</div>`;
       } else if(name.endsWith('.csv')){
+        document.getElementById('cardReviewPdf').style.display = 'none';
         document.getElementById('csvInput').value = await file.text();
         msg.innerHTML = '<div class="ok">CSV lido. Confira antes de processar.</div>';
       } else {
@@ -499,6 +579,58 @@ function renderAdminSlip(data, selectedPeriodId){
 
   const sel = document.getElementById('adminPeriodSelect');
   if(sel) sel.onchange = e => renderAdminSlip(data, e.target.value);
+}
+
+function normalizeName(s){ return normalize(s).replace(/\s+/g,' '); }
+
+async function renderPdfReview(result){
+  document.getElementById('cardReviewPdf').style.display = 'block';
+  document.getElementById('pdfPeriodo').value = result.periodo || '';
+
+  let employeesList = [];
+  try{
+    const res = await callApi('admin_list_employees', { secret: adminSecret });
+    if(res.ok) employeesList = res.employees;
+  }catch(e){ /* segue sem a lista, admin preenche CPF na mão */ }
+  const byName = {};
+  employeesList.forEach(e => { byName[normalizeName(e.nome)] = e.cpf; });
+
+  draft.pdfFuncionarios = (result.funcionarios || []).map(f => ({
+    nome: f.nome,
+    cpf: byName[normalizeName(f.nome)] || '',
+    itens: (f.itens || []).map(i => ({ descricao: i.descricao, tipo: i.tipo, valor: Number(i.valor) || 0 }))
+  }));
+
+  renderPdfEmployeesArea();
+}
+
+function renderPdfEmployeesArea(){
+  const area = document.getElementById('pdfEmployeesArea');
+  area.innerHTML = draft.pdfFuncionarios.map((f, fi) => `
+    <div style="border:1px solid var(--line);border-radius:2px;padding:16px 18px;margin-top:14px;">
+      <div class="row" style="margin-bottom:10px;">
+        <div><label>Nome</label><input type="text" data-fi="${fi}" class="pdfNome" value="${escapeHtml(f.nome)}"></div>
+        <div><label>CPF ${f.cpf ? '<span class="badge p">⚡ casado por nome</span>' : '<span class="badge i">preencher</span>'}</label><input type="text" data-fi="${fi}" class="pdfCpf" value="${escapeHtml(f.cpf)}" placeholder="000.000.000-00"></div>
+      </div>
+      <table>
+        <tr><th>Descrição</th><th>Tipo</th><th>Valor</th></tr>
+        ${f.itens.map((it, ii) => `
+          <tr>
+            <td>${escapeHtml(it.descricao)}</td>
+            <td><select data-fi="${fi}" data-ii="${ii}" class="pdfTipo">
+              <option value="provento" ${it.tipo==='provento'?'selected':''}>+ Provento</option>
+              <option value="desconto" ${it.tipo==='desconto'?'selected':''}>&minus; Desconto</option>
+            </select></td>
+            <td class="num">${fmtBRL(it.valor)}</td>
+          </tr>
+        `).join('')}
+      </table>
+    </div>
+  `).join('');
+
+  document.querySelectorAll('.pdfNome').forEach(inp => inp.oninput = e => { draft.pdfFuncionarios[e.target.getAttribute('data-fi')].nome = e.target.value; });
+  document.querySelectorAll('.pdfCpf').forEach(inp => inp.oninput = e => { draft.pdfFuncionarios[e.target.getAttribute('data-fi')].cpf = onlyDigits(e.target.value); });
+  document.querySelectorAll('.pdfTipo').forEach(sel => sel.onchange = e => { draft.pdfFuncionarios[e.target.getAttribute('data-fi')].itens[e.target.getAttribute('data-ii')].tipo = e.target.value; });
 }
 
 function renderReview(){
