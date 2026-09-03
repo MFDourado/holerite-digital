@@ -6,7 +6,6 @@
 <title>Holerite Digital · Blincast</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
@@ -46,6 +45,7 @@
 
   .brandbar{background:var(--graphite);padding:18px 20px;display:flex;justify-content:center;}
   .brandbar img{height:34px;display:block;}
+  .verstag{text-align:center;font-size:10.5px;color:var(--ink-soft);padding:6px 0 0;font-family:'IBM Plex Mono',monospace;}
 
   .topbar{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid var(--graphite);padding-bottom:14px;margin-bottom:26px;}
   .topbar .who{font-size:13px;font-weight:600;color:var(--ink-soft);}
@@ -91,9 +91,27 @@
 /* ======= CONFIGURAR ANTES DE DISTRIBUIR ======= */
 const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbyl1nm-qU-cj2ucxrtH40q4gZTXcuRrodig8xcANkQXInazRv6dKhjJv7J8zBsjqHyQSQ/exec';
 const COMPANY_NAME = 'Blincast Media';
+const APP_VERSION = 'v13';
 /* =============================================== */
 
+function ensurePdfJs(){
+  if(window.pdfjsLib) return Promise.resolve();
+  if(window.__pdfLibPromise) return window.__pdfLibPromise;
+  window.__pdfLibPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    s.onload = () => {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      resolve();
+    };
+    s.onerror = () => reject(new Error('Não consegui carregar a biblioteca de leitura de PDF. Confira sua internet (ou se algum firewall/bloqueador está travando cdnjs.cloudflare.com) e tente de novo.'));
+    document.head.appendChild(s);
+  });
+  return window.__pdfLibPromise;
+}
+
 const app = document.getElementById('app');
+document.getElementById('verspan').textContent = APP_VERSION;
 function onlyDigits(s){ return (s||'').replace(/\D/g,''); }
 function fmtBRL(n){ return (n||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -291,7 +309,7 @@ function parseCsv(text){
 
 /* ---------- leitura de PDF (holerite Blincast: Código/Descrição/Referência/Vencimentos/Descontos) ---------- */
 async function pdfToPayrollRows(file){
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
+  await ensurePdfJs();
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({data: buf}).promise;
   let allLines = [];
