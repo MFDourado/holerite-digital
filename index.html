@@ -91,7 +91,7 @@
 /* ======= CONFIGURAR ANTES DE DISTRIBUIR ======= */
 const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbyl1nm-qU-cj2ucxrtH40q4gZTXcuRrodig8xcANkQXInazRv6dKhjJv7J8zBsjqHyQSQ/exec';
 const COMPANY_NAME = 'Blincast Media';
-const APP_VERSION = 'v15';
+const APP_VERSION = 'v16';
 /* =============================================== */
 
 function ensurePdfJs(){
@@ -603,35 +603,45 @@ function renderAdmin(){
   document.getElementById('period').oninput = (e) => { draft.period = e.target.value.trim(); if(draft.headers.length) updateSummary(); };
 
   document.getElementById('dataFile').onchange = async (e) => {
-    const file = e.target.files[0];
-    if(!file) return;
+    const files = Array.from(e.target.files || []);
+    if(!files.length) return;
     const msg = document.getElementById('parseMsg');
-    const name = file.name.toLowerCase();
+    const pdfFiles = files.filter(f => f.name.toLowerCase().endsWith('.pdf'));
+    const outroArquivo = files.find(f => !f.name.toLowerCase().endsWith('.pdf'));
     try{
-      if(name.endsWith('.pdf')){
+      if(pdfFiles.length){
         document.getElementById('cardReview').style.display = 'none';
-        msg.innerHTML = '<div class="muted">lendo pdf...</div>';
-        const result = await pdfToPayrollRows(file);
-        if(!result.funcionarios.length){
-          msg.innerHTML = '<div class="error">Não consegui reconhecer nenhum holerite nesse PDF. Se ele for uma imagem/print (sem texto selecionável), me manda aqui no chat que eu transcrevo pra você.</div>';
+        let funcionarios = [];
+        let periodo = '';
+        for(let i=0; i<pdfFiles.length; i++){
+          msg.innerHTML = `<div class="muted">lendo pdf ${i+1} de ${pdfFiles.length}...</div>`;
+          const r = await pdfToPayrollRows(pdfFiles[i]);
+          if(!periodo && r.periodo) periodo = r.periodo;
+          funcionarios = funcionarios.concat(r.funcionarios);
+        }
+        if(!funcionarios.length){
+          msg.innerHTML = '<div class="error">Não consegui reconhecer nenhum holerite nesses PDFs. Se algum for imagem/print (sem texto selecionável), me manda ele aqui no chat que eu transcrevo pra você.</div>';
           return;
         }
-        renderPdfReview(result);
-        msg.innerHTML = `<div class="ok">${result.funcionarios.length} colaborador(es) lido(s) do PDF. Confira a seção 3 antes de enviar.</div>`;
-      } else if(name.endsWith('.xlsx') || name.endsWith('.xls')){
+        renderPdfReview({periodo, funcionarios});
+        msg.innerHTML = `<div class="ok">${funcionarios.length} colaborador(es) lido(s) de ${pdfFiles.length} PDF(s). Confira a seção 3 antes de enviar.</div>`;
+      } else if(outroArquivo){
+        const file = outroArquivo;
+        const name = file.name.toLowerCase();
         document.getElementById('cardReviewPdf').style.display = 'none';
-        msg.innerHTML = '<div class="muted">lendo planilha...</div>';
-        const buf = await file.arrayBuffer();
-        const wb = XLSX.read(buf, {type:'array'});
-        const sheet = wb.Sheets[wb.SheetNames[0]];
-        document.getElementById('csvInput').value = XLSX.utils.sheet_to_csv(sheet, {FS: '\t'});
-        msg.innerHTML = `<div class="ok">Planilha lida (aba "${escapeHtml(wb.SheetNames[0])}"). Confira antes de processar.</div>`;
-      } else if(name.endsWith('.csv')){
-        document.getElementById('cardReviewPdf').style.display = 'none';
-        document.getElementById('csvInput').value = await file.text();
-        msg.innerHTML = '<div class="ok">CSV lido. Confira antes de processar.</div>';
-      } else {
-        msg.innerHTML = '<div class="error">Formato não reconhecido. Use PDF, .xlsx, .xls ou .csv.</div>';
+        if(name.endsWith('.xlsx') || name.endsWith('.xls')){
+          msg.innerHTML = '<div class="muted">lendo planilha...</div>';
+          const buf = await file.arrayBuffer();
+          const wb = XLSX.read(buf, {type:'array'});
+          const sheet = wb.Sheets[wb.SheetNames[0]];
+          document.getElementById('csvInput').value = XLSX.utils.sheet_to_csv(sheet, {FS: '\t'});
+          msg.innerHTML = `<div class="ok">Planilha lida (aba "${escapeHtml(wb.SheetNames[0])}"). Confira antes de processar.</div>`;
+        } else if(name.endsWith('.csv')){
+          document.getElementById('csvInput').value = await file.text();
+          msg.innerHTML = '<div class="ok">CSV lido. Confira antes de processar.</div>';
+        } else {
+          msg.innerHTML = '<div class="error">Formato não reconhecido. Use PDF, .xlsx, .xls ou .csv.</div>';
+        }
       }
     }catch(err){
       msg.innerHTML = `<div class="error">Não consegui ler o arquivo: ${escapeHtml(err.message||err)}</div>`;
@@ -720,17 +730,32 @@ function renderAdminSlip(data, selectedPeriodId){
 }
 
 let pdfDraft = null;
+let pdfIndex = 0;
 
 function renderPdfReview(result){
   document.getElementById('cardReviewPdf').style.display = 'block';
   pdfDraft = result;
+  pdfIndex = 0;
   document.getElementById('pdfPeriodo').value = result.periodo || '';
   renderPdfEmployeesArea();
 }
 
 function renderPdfEmployeesArea(){
   const area = document.getElementById('pdfEmployeesArea');
-  area.innerHTML = pdfDraft.funcionarios.map((f, fi) => `
+  const total = pdfDraft.funcionarios.length;
+  if(pdfIndex >= total) pdfIndex = total - 1;
+  if(pdfIndex < 0) pdfIndex = 0;
+  const f = pdfDraft.funcionarios[pdfIndex];
+  const fi = pdfIndex;
+
+  area.innerHTML = `
+    ${total > 1 ? `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px;">
+        <button class="ghost auto" id="btnPdfPrev" ${pdfIndex===0?'disabled':''}>&larr; Anterior</button>
+        <span class="muted">${pdfIndex+1} de ${total}</span>
+        <button class="ghost auto" id="btnPdfNext" ${pdfIndex===total-1?'disabled':''}>Próximo &rarr;</button>
+      </div>
+    ` : ''}
     <div style="border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-top:14px;">
       <div class="row" style="margin-bottom:10px;">
         <div><label>Nome</label><input type="text" data-fi="${fi}" class="pdfNome" value="${escapeHtml(f.nome)}"></div>
@@ -750,11 +775,15 @@ function renderPdfEmployeesArea(){
         `).join('')}
       </table>
     </div>
-  `).join('');
+  `;
 
   document.querySelectorAll('.pdfNome').forEach(inp => inp.oninput = e => { pdfDraft.funcionarios[e.target.getAttribute('data-fi')].nome = e.target.value; });
   document.querySelectorAll('.pdfMatricula').forEach(inp => inp.oninput = e => { pdfDraft.funcionarios[e.target.getAttribute('data-fi')].matricula = e.target.value.trim(); });
   document.querySelectorAll('.pdfTipo').forEach(sel => sel.onchange = e => { pdfDraft.funcionarios[e.target.getAttribute('data-fi')].itens[e.target.getAttribute('data-ii')].tipo = e.target.value; });
+  const btnPrev = document.getElementById('btnPdfPrev');
+  const btnNext = document.getElementById('btnPdfNext');
+  if(btnPrev) btnPrev.onclick = () => { pdfIndex--; renderPdfEmployeesArea(); };
+  if(btnNext) btnNext.onclick = () => { pdfIndex++; renderPdfEmployeesArea(); };
 }
 
 function renderReview(){
