@@ -289,6 +289,103 @@ function parseCsv(text){
   return {headers, rows};
 }
 
+/* ---------- leitura de PDF (holerite Blincast: Código/Descrição/Referência/Vencimentos/Descontos) ---------- */
+async function pdfToPayrollRows(file){
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+  let allLines = [];
+  for(let p=1; p<=pdf.numPages; p++){
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    const items = content.items.map(it => ({ text: it.str, x: it.transform[4], y: Math.round(it.transform[5]) })).filter(it => it.text.trim().length>0);
+    const byY = {};
+    items.forEach(it => { const key = Math.round(it.y/3)*3; (byY[key]=byY[key]||[]).push(it); });
+    const ys = Object.keys(byY).map(Number).sort((a,b)=>b-a);
+    ys.forEach(y => allLines.push(byY[y].sort((a,b)=>a.x-b.x)));
+  }
+
+  const rowText = row => row.map(it=>it.text).join(' ');
+  const normRow = row => normalize(rowText(row));
+  function snap(row, anchors){
+    const cells = anchors.map(()=>[]);
+    row.forEach(it=>{
+      let best=0, bestDist=Infinity;
+      anchors.forEach((ax,i)=>{ const d=Math.abs(ax-it.x); if(d<bestDist){bestDist=d; best=i;} });
+      cells[best].push(it.text);
+    });
+    return cells.map(c=>c.join(' ').trim());
+  }
+  function moneyVal(s){
+    if(!s) return 0;
+    if(/^\d{1,2}:\d{2}$/.test(s.trim())) return 0; // é hora (coluna Referência), não valor
+    if(!/\d/.test(s)) return 0;
+    return parseBRL(s);
+  }
+  function limparDescricao(s){ return s.replace(/\.\s*$/,'').replace(/\s+/g,' ').trim(); }
+
+  const ANCHORS_FUNC = [19, 51, 377, 431, 490];       // código | nome | cbo | departamento | filial
+  const ANCHORS_ITEM = [6, 135, 291, 370, 454];       // código | descrição | referência | vencimentos | descontos
+
+  const funcionariosBrutos = [];
+  let periodo = '';
+  let atual = null;
+  let coletandoItens = false;
+
+  for(let i=0; i<allLines.length; i++){
+    const row = allLines[i];
+    const nrow = normRow(row);
+
+    if(!periodo){
+      const m = rowText(row).match(/([A-Za-zÀ-úà-ú]+)\s+de\s+(\d{4})/);
+      if(m) periodo = `${m[1]}/${m[2]}`;
+    }
+
+    if(nrow.includes('nome') && nrow.includes('funcionario') && nrow.includes('cbo') && allLines[i+1]){
+      const cells = snap(allLines[i+1], ANCHORS_FUNC);
+      const matricula = (cells[0]||'').trim();
+      const nome = (cells[1]||'').trim();
+      if(matricula && nome){
+        if(atual && atual.itens.length) funcionariosBrutos.push(atual);
+        atual = { matricula, nome, itens: [] };
+        coletandoItens = false;
+      }
+      continue;
+    }
+
+    if(nrow.includes('codigo') && nrow.includes('descricao') && nrow.includes('vencimentos') && nrow.includes('descontos')){
+      coletandoItens = true;
+      continue;
+    }
+
+    if(coletandoItens){
+      if(nrow.includes('total') && (nrow.includes('vencimentos') || nrow.includes('descontos'))){
+        coletandoItens = false;
+        continue;
+      }
+      const cells = snap(row, ANCHORS_ITEM);
+      const descricao = limparDescricao(cells[1]||'');
+      const vencimento = moneyVal(cells[3]);
+      const desconto = moneyVal(cells[4]);
+      if(atual && descricao){
+        if(vencimento) atual.itens.push({descricao, tipo:'provento', valor:vencimento});
+        if(desconto) atual.itens.push({descricao, tipo:'desconto', valor:desconto});
+      }
+    }
+  }
+  if(atual && atual.itens.length) funcionariosBrutos.push(atual);
+
+  // remove duplicatas (vias repetidas do mesmo holerite) — mantém só a 1ª ocorrência por matrícula
+  const vistos = new Set();
+  const funcionarios = funcionariosBrutos.filter(f=>{
+    if(vistos.has(f.matricula)) return false;
+    vistos.add(f.matricula);
+    return true;
+  });
+
+  return { periodo, funcionarios };
+}
+
 function renderAdmin(){
   app.className = 'wide';
   const isRh = adminRole === 'rh';
@@ -319,12 +416,21 @@ function renderAdmin(){
       <p class="hint">Cole os dados direto do Excel/Sheets, ou anexe um arquivo .xlsx/.xls/.csv. Se sua folha só existir em PDF, me manda o PDF na nossa conversa que eu transcrevo pra um formato que cola aqui.${isRh ? '' : ' Linhas de matrículas fora do setor operacional são ignoradas automaticamente.'}</p>
       <div class="row">
         <div><label>Referência do período</label><input type="text" id="period" placeholder="Ex: Agosto/2026"></div>
-        <div><label>Arquivo (opcional)</label><input type="file" id="dataFile" accept=".xlsx,.xls,.csv"></div>
+        <div><label>Arquivo (opcional)</label><input type="file" id="dataFile" accept=".xlsx,.xls,.csv,.pdf"></div>
       </div>
       <label>Dados (colados do Excel/Sheets, ou preenchidos automaticamente ao anexar o arquivo)</label>
       <textarea id="csvInput" placeholder="Nome	Matrícula	Salário Base	INSS	IRRF	Vale Transporte"></textarea>
       <div style="margin-top:14px;"><button class="auto" id="btnParse">Processar e classificar automaticamente</button></div>
       <div id="parseMsg"></div>
+    </div>
+
+    <div class="card" id="cardReviewPdf" style="display:none;">
+      <h2>3. Conferência rápida (PDF)</h2>
+      <p class="hint">Nome, matrícula e período lidos direto do PDF — confira os itens antes de enviar. Se um item veio classificado errado (provento/desconto), corrige no menu.</p>
+      <div class="row"><div><label>Período detectado</label><input type="text" id="pdfPeriodo"></div></div>
+      <div id="pdfEmployeesArea"></div>
+      <div style="margin-top:14px;"><button class="auto" id="btnPushPdf">Enviar para a planilha</button></div>
+      <div id="pushPdfMsg"></div>
     </div>
 
     <div class="card" id="cardReview" style="display:none;">
@@ -428,8 +534,30 @@ function renderAdmin(){
           msg.innerHTML = `<div class="error">${escapeHtml(e.message||e)}</div>`;
         }
       };
+
     }catch(e){
       area.innerHTML = `<div class="error">${escapeHtml(e.message||e)}</div>`;
+    }
+  };
+
+  document.getElementById('btnPushPdf').onclick = async () => {
+    const msg = document.getElementById('pushPdfMsg');
+    const periodo = document.getElementById('pdfPeriodo').value.trim();
+    if(!periodo){ msg.innerHTML = '<div class="error">Preencha o período detectado (ou corrija manualmente).</div>'; return; }
+    const semMatricula = pdfDraft.funcionarios.filter(f => !f.matricula);
+    if(semMatricula.length){ msg.innerHTML = `<div class="error">Falta matrícula pra: ${semMatricula.map(f=>escapeHtml(f.nome)).join(', ')}.</div>`; return; }
+    msg.innerHTML = '<div class="muted">enviando...</div>';
+    try{
+      const rows = pdfDraft.funcionarios.map(f => ({
+        matricula: f.matricula, nome: f.nome,
+        items: f.itens.filter(i => i.valor !== 0)
+      }));
+      const res = await callApi('admin_push', { secret: adminSecret, period_label: periodo, rows });
+      if(!res.ok) throw new Error(res.error);
+      const avisoFora = res.fora_do_setor_ignorados ? ` (${res.fora_do_setor_ignorados} fora do setor operacional, ignorado(s))` : '';
+      msg.innerHTML = `<div class="ok">Período "${escapeHtml(periodo)}" enviado — ${res.count} colaborador(es) processado(s)${avisoFora}.</div>`;
+    }catch(e){
+      msg.innerHTML = `<div class="error">Erro ao enviar: ${escapeHtml(e.message||e)}</div>`;
     }
   };
 
@@ -443,7 +571,18 @@ function renderAdmin(){
     const msg = document.getElementById('parseMsg');
     const name = file.name.toLowerCase();
     try{
-      if(name.endsWith('.xlsx') || name.endsWith('.xls')){
+      if(name.endsWith('.pdf')){
+        document.getElementById('cardReview').style.display = 'none';
+        msg.innerHTML = '<div class="muted">lendo pdf...</div>';
+        const result = await pdfToPayrollRows(file);
+        if(!result.funcionarios.length){
+          msg.innerHTML = '<div class="error">Não consegui reconhecer nenhum holerite nesse PDF. Se ele for uma imagem/print (sem texto selecionável), me manda aqui no chat que eu transcrevo pra você.</div>';
+          return;
+        }
+        renderPdfReview(result);
+        msg.innerHTML = `<div class="ok">${result.funcionarios.length} colaborador(es) lido(s) do PDF. Confira a seção 3 antes de enviar.</div>`;
+      } else if(name.endsWith('.xlsx') || name.endsWith('.xls')){
+        document.getElementById('cardReviewPdf').style.display = 'none';
         msg.innerHTML = '<div class="muted">lendo planilha...</div>';
         const buf = await file.arrayBuffer();
         const wb = XLSX.read(buf, {type:'array'});
@@ -451,6 +590,7 @@ function renderAdmin(){
         document.getElementById('csvInput').value = XLSX.utils.sheet_to_csv(sheet, {FS: '\t'});
         msg.innerHTML = `<div class="ok">Planilha lida (aba "${escapeHtml(wb.SheetNames[0])}"). Confira antes de processar.</div>`;
       } else if(name.endsWith('.csv')){
+        document.getElementById('cardReviewPdf').style.display = 'none';
         document.getElementById('csvInput').value = await file.text();
         msg.innerHTML = '<div class="ok">CSV lido. Confira antes de processar.</div>';
       } else {
@@ -540,6 +680,44 @@ function renderAdminSlip(data, selectedPeriodId){
 
   const sel = document.getElementById('adminPeriodSelect');
   if(sel) sel.onchange = e => renderAdminSlip(data, e.target.value);
+}
+
+let pdfDraft = null;
+
+function renderPdfReview(result){
+  document.getElementById('cardReviewPdf').style.display = 'block';
+  pdfDraft = result;
+  document.getElementById('pdfPeriodo').value = result.periodo || '';
+  renderPdfEmployeesArea();
+}
+
+function renderPdfEmployeesArea(){
+  const area = document.getElementById('pdfEmployeesArea');
+  area.innerHTML = pdfDraft.funcionarios.map((f, fi) => `
+    <div style="border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-top:14px;">
+      <div class="row" style="margin-bottom:10px;">
+        <div><label>Nome</label><input type="text" data-fi="${fi}" class="pdfNome" value="${escapeHtml(f.nome)}"></div>
+        <div><label>Matrícula</label><input type="text" data-fi="${fi}" class="pdfMatricula" value="${escapeHtml(f.matricula)}"></div>
+      </div>
+      <table>
+        <tr><th>Descrição</th><th>Tipo</th><th>Valor</th></tr>
+        ${f.itens.map((it, ii) => `
+          <tr>
+            <td>${escapeHtml(it.descricao)}</td>
+            <td><select data-fi="${fi}" data-ii="${ii}" class="pdfTipo">
+              <option value="provento" ${it.tipo==='provento'?'selected':''}>+ Provento</option>
+              <option value="desconto" ${it.tipo==='desconto'?'selected':''}>&minus; Desconto</option>
+            </select></td>
+            <td class="num">${fmtBRL(it.valor)}</td>
+          </tr>
+        `).join('')}
+      </table>
+    </div>
+  `).join('');
+
+  document.querySelectorAll('.pdfNome').forEach(inp => inp.oninput = e => { pdfDraft.funcionarios[e.target.getAttribute('data-fi')].nome = e.target.value; });
+  document.querySelectorAll('.pdfMatricula').forEach(inp => inp.oninput = e => { pdfDraft.funcionarios[e.target.getAttribute('data-fi')].matricula = e.target.value.trim(); });
+  document.querySelectorAll('.pdfTipo').forEach(sel => sel.onchange = e => { pdfDraft.funcionarios[e.target.getAttribute('data-fi')].itens[e.target.getAttribute('data-ii')].tipo = e.target.value; });
 }
 
 function renderReview(){
