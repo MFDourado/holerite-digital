@@ -117,9 +117,9 @@ function renderAuth(errorMsg){
   app.className = '';
   app.innerHTML = `
     <h1>${escapeHtml(COMPANY_NAME)}</h1>
-    <p class="sub">${mode==='login' ? 'entre com seu CPF e senha' : 'primeiro acesso — crie sua senha'}</p>
-    <label>CPF</label>
-    <input type="text" id="cpf" inputmode="numeric" placeholder="000.000.000-00" maxlength="14">
+    <p class="sub">${mode==='login' ? 'entre com sua matrícula e senha' : 'primeiro acesso — crie sua senha'}</p>
+    <label>Matrícula</label>
+    <input type="text" id="matricula" inputmode="numeric" placeholder="Ex: 78">
     <label>Senha</label>
     <input type="password" id="senha" placeholder="mínimo 6 caracteres">
     ${errorMsg ? `<div class="error">${escapeHtml(errorMsg)}</div>` : ''}
@@ -138,12 +138,12 @@ function renderAuth(errorMsg){
 }
 
 async function doLogin(){
-  const cpf = onlyDigits(document.getElementById('cpf').value);
+  const matricula = document.getElementById('matricula').value.trim();
   const senha = document.getElementById('senha').value;
-  if(cpf.length!==11 || senha.length<6){ renderAuth('Confira o CPF (11 dígitos) e a senha.'); return; }
+  if(!matricula || senha.length<6){ renderAuth('Confira a matrícula e a senha.'); return; }
   document.getElementById('btnGo').disabled = true;
   let res;
-  try{ res = await callApi('login', {cpf, senha}); }
+  try{ res = await callApi('login', {matricula, senha}); }
   catch(e){ renderAuth('Não consegui falar com o servidor. Confira sua internet e tente de novo.'); return; }
   if(!res.ok){ renderAuth(res.error); return; }
   session = res;
@@ -151,12 +151,12 @@ async function doLogin(){
 }
 
 async function doSignup(){
-  const cpf = onlyDigits(document.getElementById('cpf').value);
+  const matricula = document.getElementById('matricula').value.trim();
   const senha = document.getElementById('senha').value;
-  if(cpf.length!==11 || senha.length<6){ renderAuth('Confira o CPF (11 dígitos) e a senha (mínimo 6 caracteres).'); return; }
+  if(!matricula || senha.length<6){ renderAuth('Confira a matrícula e a senha (mínimo 6 caracteres).'); return; }
   document.getElementById('btnGo').disabled = true;
   let res;
-  try{ res = await callApi('signup', {cpf, senha}); }
+  try{ res = await callApi('signup', {matricula, senha}); }
   catch(e){ renderAuth('Não consegui falar com o servidor. Confira sua internet e tente de novo.'); return; }
   if(!res.ok){ renderAuth(res.error); return; }
   session = res;
@@ -250,7 +250,7 @@ const IGNORE_TERMS = ['nome','colaborador','funcionario','cpf','matricula','carg
 function dictClassify(header){
   const h = normalize(header);
   if(IGNORE_TERMS.some(t=>h.includes(t))){
-    if(h.includes('cpf')) return 'cpf';
+    if(h.includes('matricula')||h.includes('codigo')) return 'matricula';
     if(h.includes('nome')||h.includes('colaborador')||h.includes('funcionario')) return 'nome';
     return 'ignorar';
   }
@@ -272,69 +272,6 @@ function parseCsv(text){
   return {headers, rows};
 }
 
-async function pdfToGrid(file){
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
-  const buf = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({data: buf}).promise;
-  let allLines = [];
-  for(let p=1; p<=pdf.numPages; p++){
-    const page = await pdf.getPage(p);
-    const content = await page.getTextContent();
-    const items = content.items.map(it => ({ text: it.str, x: it.transform[4], y: Math.round(it.transform[5]) })).filter(it => it.text.trim().length>0);
-    const byY = {};
-    items.forEach(it => { const key = Math.round(it.y/3)*3; (byY[key]=byY[key]||[]).push(it); });
-    const ys = Object.keys(byY).map(Number).sort((a,b)=>b-a);
-    ys.forEach(y => allLines.push(byY[y].sort((a,b)=>a.x-b.x)));
-  }
-  return allLines.map(row => row.map(it=>it.text).join(' ')).join('\n');
-}
-
-function arrayBufferToBase64(buf){
-  let binary = '';
-  const bytes = new Uint8Array(buf);
-  const chunk = 0x8000;
-  for(let i=0; i<bytes.length; i+=chunk){
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i+chunk));
-  }
-  return btoa(binary);
-}
-
-async function extractPayrollFromPDF(file){
-  const buf = await file.arrayBuffer();
-  const base64 = arrayBufferToBase64(buf);
-  const prompt = `Esta é uma folha de pagamento ou holerite brasileiro (pode ter um ou vários funcionários). Extraia os dados e responda SOMENTE com um JSON válido, sem nenhum texto antes ou depois, no formato exato:
-{"periodo":"Agosto/2026","funcionarios":[{"nome":"NOME COMPLETO EM MAIÚSCULAS OU COMO APARECE","itens":[{"descricao":"Salário Base","tipo":"provento","valor":6000.00}]}]}
-Regras: "tipo" é "provento" para valores na coluna de vencimentos/proventos, "desconto" para valores na coluna de descontos. NÃO inclua linhas de total, base de cálculo, CBO, departamento, filial, código do funcionário. Use ponto como separador decimal (nunca vírgula) nos números do JSON. O campo "periodo" no formato "Mês/Ano" (ex: "Agosto/2026"), capturado do cabeçalho do documento (ex: "Agosto de 2026" vira "Agosto/2026"). Se houver mais de um funcionário no documento (várias páginas), inclua todos no array.`;
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({
-      model:'claude-sonnet-4-6', max_tokens:4096,
-      messages:[{role:'user', content:[
-        {type:'document', source:{type:'base64', media_type:'application/pdf', data: base64}},
-        {type:'text', text: prompt}
-      ]}]
-    })
-  });
-  const data = await resp.json();
-  const text = (data.content||[]).filter(c=>c.type==='text').map(c=>c.text).join('');
-  const clean = text.replace(/```json|```/g,'').trim();
-  return JSON.parse(clean);
-}
-
-async function classifyWithAI(headers){
-  const prompt = `Classifique cada cabeçalho de coluna de uma folha de pagamento brasileira em exatamente um destes rótulos: "provento" (soma no salário), "desconto" (subtrai do salário) ou "ignorar" (não é um valor monetário de proventos/descontos, ex: nome, cpf, cargo, total, líquido).
-Cabeçalhos: ${JSON.stringify(headers)}
-Responda SOMENTE um JSON válido no formato {"cabecalho1":"provento","cabecalho2":"desconto"}, sem nenhum texto antes ou depois.`;
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:1000, messages:[{role:'user', content:prompt}] })
-  });
-  const data = await resp.json();
-  const text = (data.content||[]).filter(c=>c.type==='text').map(c=>c.text).join('');
-  const clean = text.replace(/```json|```/g,'').trim();
-  return JSON.parse(clean);
-}
-
 function renderAdmin(){
   app.className = 'wide';
   app.innerHTML = `
@@ -345,48 +282,37 @@ function renderAdmin(){
 
     <div class="card">
       <h2>1. Cadastrar colaboradores</h2>
-      <p class="hint">Cadastro individual (nome + CPF) ou importação em massa colando uma lista. Isso libera o "primeiro acesso" antes mesmo da folha chegar, e é o que permite casar nome com CPF quando o holerite em PDF não traz o CPF.</p>
+      <p class="hint">Cadastro individual (nome + matrícula) ou importação em massa colando uma lista. Isso libera o "primeiro acesso" antes mesmo da folha chegar. A matrícula é o mesmo número que aparece como "Código" no holerite.</p>
       <div class="row">
         <div><label>Nome completo</label><input type="text" id="newEmpNome" placeholder="Ex: João da Silva"></div>
-        <div><label>CPF</label><input type="text" id="newEmpCpf" placeholder="000.000.000-00" maxlength="14"></div>
+        <div><label>Matrícula</label><input type="text" id="newEmpMatricula" placeholder="Ex: 78"></div>
       </div>
       <button class="auto" id="btnAddEmp">Cadastrar colaborador</button>
       <div id="addEmpMsg"></div>
       <hr style="border:none;border-top:1px solid var(--line-soft);margin:18px 0;">
-      <label>Importar lista (uma linha por pessoa — nome, e o CPF na última coluna; colunas do meio são ignoradas)</label>
-      <textarea id="bulkImportInput" placeholder="Nome Completo	usuario (opcional)	000.000.000-00"></textarea>
+      <label>Importar lista (uma linha por pessoa — nome, e a matrícula na última coluna; colunas do meio são ignoradas)</label>
+      <textarea id="bulkImportInput" placeholder="Nome Completo	cargo (opcional)	78"></textarea>
       <div style="margin-top:14px;"><button class="ghost auto" id="btnBulkImport">Importar lista</button></div>
       <div id="bulkImportMsg"></div>
     </div>
 
     <div class="card">
       <h2>2. Enviar a folha do mês</h2>
-      <p class="hint">Envie o PDF (holerite individual ou tabela consolidada — a leitura é feita por IA, funciona mesmo em PDF "imagem" sem texto), Excel (.xlsx/.xls) ou CSV. Ou cole os dados direto do Excel/Sheets.</p>
+      <p class="hint">Cole os dados direto do Excel/Sheets, ou anexe um arquivo .xlsx/.xls/.csv. Se sua folha só existir em PDF, me manda o PDF na nossa conversa que eu transcrevo pra um formato que cola aqui.</p>
       <div class="row">
-        <div><label>Referência do período (só necessário pra Excel/CSV — o PDF detecta sozinho)</label><input type="text" id="period" placeholder="Ex: Agosto/2026"></div>
-        <div><label>Arquivo (opcional)</label><input type="file" id="dataFile" accept="application/pdf,.xlsx,.xls,.csv"></div>
+        <div><label>Referência do período</label><input type="text" id="period" placeholder="Ex: Agosto/2026"></div>
+        <div><label>Arquivo (opcional)</label><input type="file" id="dataFile" accept=".xlsx,.xls,.csv"></div>
       </div>
-      <label>Dados (colados do Excel/Sheets, ou preenchidos automaticamente ao anexar .xlsx/.csv)</label>
-      <textarea id="csvInput" placeholder="Nome	CPF	Salário Base	INSS	IRRF	Vale Transporte"></textarea>
+      <label>Dados (colados do Excel/Sheets, ou preenchidos automaticamente ao anexar o arquivo)</label>
+      <textarea id="csvInput" placeholder="Nome	Matrícula	Salário Base	INSS	IRRF	Vale Transporte"></textarea>
       <div style="margin-top:14px;"><button class="auto" id="btnParse">Processar e classificar automaticamente</button></div>
       <div id="parseMsg"></div>
     </div>
 
-    <div class="card" id="cardReviewPdf" style="display:none;">
-      <h2>3. Conferência rápida (PDF lido por IA)</h2>
-      <p class="hint">Confira nome, CPF (preenchido sozinho quando bate com um colaborador já cadastrado — se não achar, digite manualmente) e os itens de cada holerite antes de enviar.</p>
-      <div class="row"><div><label>Período detectado</label><input type="text" id="pdfPeriodo"></div></div>
-      <div id="pdfEmployeesArea"></div>
-      <div style="margin-top:14px;"><button class="auto" id="btnPushPdf">Enviar para a planilha</button></div>
-      <div id="pushPdfMsg"></div>
-    </div>
-
     <div class="card" id="cardReview" style="display:none;">
-      <h2>4. Conferência rápida (Excel/CSV)</h2>
-      <p class="hint">Classificação automática por dicionário (⚡). Colunas não reconhecidas caem pra IA (🤖) ou ficam marcadas pra revisar.</p>
+      <h2>3. Conferência rápida</h2>
+      <p class="hint">Classificação automática por dicionário de termos de folha (⚡). Colunas não reconhecidas ficam marcadas como "revisar" — escolha manualmente no menu.</p>
       <table><tr><th>Coluna</th><th>Amostra</th><th>Classificação</th></tr><tbody id="colTableBody"></tbody></table>
-      <div style="margin-top:14px;"><button class="ghost auto" id="btnAI">Classificar restantes com IA 🤖</button></div>
-      <div id="aiMsg"></div>
       <hr style="border:none;border-top:1px solid var(--line-soft);margin:18px 0;">
       <div class="muted" id="summaryLine"></div>
       <div style="margin-top:14px;"><button class="auto" id="btnPush">Enviar para a planilha</button></div>
@@ -394,7 +320,7 @@ function renderAdmin(){
     </div>
 
     <div class="card">
-      <h2>5. Ver contracheques dos colaboradores</h2>
+      <h2>4. Ver contracheques dos colaboradores</h2>
       <p class="hint">Escolha um colaborador pra ver os contracheques dele (últimos 12 meses), do mesmo jeito que ele vê.</p>
       <div class="row">
         <div><label>Colaborador</label><select id="empSelect"><option value="">Carregando...</option></select></div>
@@ -406,38 +332,18 @@ function renderAdmin(){
 
   document.getElementById('btnAddEmp').onclick = async () => {
     const nome = document.getElementById('newEmpNome').value.trim();
-    const cpf = onlyDigits(document.getElementById('newEmpCpf').value);
+    const matricula = document.getElementById('newEmpMatricula').value.trim();
     const msg = document.getElementById('addEmpMsg');
-    if(!nome || cpf.length!==11){ msg.innerHTML = '<div class="error">Preencha o nome e um CPF válido (11 dígitos).</div>'; return; }
+    if(!nome || !matricula){ msg.innerHTML = '<div class="error">Preencha o nome e a matrícula.</div>'; return; }
     msg.innerHTML = '<div class="muted">cadastrando...</div>';
     try{
-      const res = await callApi('admin_add_employee', { secret: adminSecret, nome, cpf });
+      const res = await callApi('admin_add_employee', { secret: adminSecret, nome, matricula });
       if(!res.ok) throw new Error(res.error);
       msg.innerHTML = `<div class="ok">"${escapeHtml(nome)}" cadastrado(a) — já pode fazer o primeiro acesso pelo link do portal.</div>`;
       document.getElementById('newEmpNome').value = '';
-      document.getElementById('newEmpCpf').value = '';
+      document.getElementById('newEmpMatricula').value = '';
     }catch(e){
       msg.innerHTML = `<div class="error">${escapeHtml(e.message||e)}</div>`;
-    }
-  };
-
-  document.getElementById('btnPushPdf').onclick = async () => {
-    const msg = document.getElementById('pushPdfMsg');
-    const periodo = document.getElementById('pdfPeriodo').value.trim();
-    if(!periodo){ msg.innerHTML = '<div class="error">Preencha o período detectado (ou corrija manualmente).</div>'; return; }
-    const semCpf = draft.pdfFuncionarios.filter(f => onlyDigits(f.cpf).length !== 11);
-    if(semCpf.length){ msg.innerHTML = `<div class="error">Falta CPF válido pra: ${semCpf.map(f=>escapeHtml(f.nome)).join(', ')}.</div>`; return; }
-    msg.innerHTML = '<div class="muted">enviando...</div>';
-    try{
-      const rows = draft.pdfFuncionarios.map(f => ({
-        cpf: onlyDigits(f.cpf), nome: f.nome,
-        items: f.itens.filter(i => i.valor !== 0)
-      }));
-      const res = await callApi('admin_push', { secret: adminSecret, period_label: periodo, rows });
-      if(!res.ok) throw new Error(res.error);
-      msg.innerHTML = `<div class="ok">Período "${escapeHtml(periodo)}" enviado — ${res.count} colaborador(es) processado(s).</div>`;
-    }catch(e){
-      msg.innerHTML = `<div class="error">Erro ao enviar: ${escapeHtml(e.message||e)}</div>`;
     }
   };
 
@@ -449,15 +355,15 @@ function renderAdmin(){
     const employees = lines.map(line => {
       const cells = line.split('\t').map(c=>c.trim());
       const nome = cells[0];
-      const cpf = onlyDigits(cells[cells.length-1]);
-      return {nome, cpf};
-    }).filter(e => e.nome && e.cpf.length===11);
-    if(employees.length===0){ msg.innerHTML = '<div class="error">Não consegui reconhecer nome/CPF nas linhas coladas. Confira se está separado por tabulação (copiado direto do Excel/Sheets).</div>'; return; }
+      const matricula = cells[cells.length-1];
+      return {nome, matricula};
+    }).filter(e => e.nome && e.matricula);
+    if(employees.length===0){ msg.innerHTML = '<div class="error">Não consegui reconhecer nome/matrícula nas linhas coladas. Confira se está separado por tabulação (copiado direto do Excel/Sheets).</div>'; return; }
     msg.innerHTML = '<div class="muted">importando...</div>';
     try{
       const res = await callApi('admin_bulk_add_employees', { secret: adminSecret, employees });
       if(!res.ok) throw new Error(res.error);
-      msg.innerHTML = `<div class="ok">${res.added} cadastrado(s), ${res.skipped} ignorado(s) (já existiam ou CPF inválido).</div>`;
+      msg.innerHTML = `<div class="ok">${res.added} cadastrado(s), ${res.skipped} ignorado(s) (já existiam ou matrícula inválida).</div>`;
       document.getElementById('bulkImportInput').value = '';
     }catch(e){
       msg.innerHTML = `<div class="error">${escapeHtml(e.message||e)}</div>`;
@@ -474,14 +380,7 @@ function renderAdmin(){
     const msg = document.getElementById('parseMsg');
     const name = file.name.toLowerCase();
     try{
-      if(name.endsWith('.pdf')){
-        document.getElementById('cardReview').style.display = 'none';
-        msg.innerHTML = '<div class="muted">lendo pdf com IA (pode levar alguns segundos)...</div>';
-        const result = await extractPayrollFromPDF(file);
-        await renderPdfReview(result);
-        msg.innerHTML = '<div class="ok">PDF lido. Confira a seção 3 abaixo antes de enviar.</div>';
-      } else if(name.endsWith('.xlsx') || name.endsWith('.xls')){
-        document.getElementById('cardReviewPdf').style.display = 'none';
+      if(name.endsWith('.xlsx') || name.endsWith('.xls')){
         msg.innerHTML = '<div class="muted">lendo planilha...</div>';
         const buf = await file.arrayBuffer();
         const wb = XLSX.read(buf, {type:'array'});
@@ -489,7 +388,6 @@ function renderAdmin(){
         document.getElementById('csvInput').value = XLSX.utils.sheet_to_csv(sheet, {FS: '\t'});
         msg.innerHTML = `<div class="ok">Planilha lida (aba "${escapeHtml(wb.SheetNames[0])}"). Confira antes de processar.</div>`;
       } else if(name.endsWith('.csv')){
-        document.getElementById('cardReviewPdf').style.display = 'none';
         document.getElementById('csvInput').value = await file.text();
         msg.innerHTML = '<div class="ok">CSV lido. Confira antes de processar.</div>';
       } else {
@@ -522,7 +420,7 @@ async function loadEmployeeList(){
   try{
     const res = await callApi('admin_list_employees', { secret: adminSecret });
     if(!res.ok) throw new Error(res.error);
-    sel.innerHTML = '<option value="">Selecione...</option>' + res.employees.map(e => `<option value="${e.cpf}">${escapeHtml(e.nome)}</option>`).join('');
+    sel.innerHTML = '<option value="">Selecione...</option>' + res.employees.map(e => `<option value="${escapeHtml(e.matricula)}">${escapeHtml(e.nome)}</option>`).join('');
     sel.onchange = () => loadEmployeePayslip(sel.value);
   }catch(e){
     sel.innerHTML = '<option value="">Erro ao carregar</option>';
@@ -530,12 +428,12 @@ async function loadEmployeeList(){
   }
 }
 
-async function loadEmployeePayslip(cpf){
+async function loadEmployeePayslip(matricula){
   const area = document.getElementById('adminSlipArea');
-  if(!cpf){ area.innerHTML=''; return; }
+  if(!matricula){ area.innerHTML=''; return; }
   area.innerHTML = '<p class="muted">carregando...</p>';
   try{
-    const res = await callApi('admin_payslip', { secret: adminSecret, cpf });
+    const res = await callApi('admin_payslip', { secret: adminSecret, matricula });
     if(!res.ok) throw new Error(res.error);
     renderAdminSlip(res, res.periods[0] ? res.periods[0].id : null);
   }catch(e){
@@ -581,58 +479,6 @@ function renderAdminSlip(data, selectedPeriodId){
   if(sel) sel.onchange = e => renderAdminSlip(data, e.target.value);
 }
 
-function normalizeName(s){ return normalize(s).replace(/\s+/g,' '); }
-
-async function renderPdfReview(result){
-  document.getElementById('cardReviewPdf').style.display = 'block';
-  document.getElementById('pdfPeriodo').value = result.periodo || '';
-
-  let employeesList = [];
-  try{
-    const res = await callApi('admin_list_employees', { secret: adminSecret });
-    if(res.ok) employeesList = res.employees;
-  }catch(e){ /* segue sem a lista, admin preenche CPF na mão */ }
-  const byName = {};
-  employeesList.forEach(e => { byName[normalizeName(e.nome)] = e.cpf; });
-
-  draft.pdfFuncionarios = (result.funcionarios || []).map(f => ({
-    nome: f.nome,
-    cpf: byName[normalizeName(f.nome)] || '',
-    itens: (f.itens || []).map(i => ({ descricao: i.descricao, tipo: i.tipo, valor: Number(i.valor) || 0 }))
-  }));
-
-  renderPdfEmployeesArea();
-}
-
-function renderPdfEmployeesArea(){
-  const area = document.getElementById('pdfEmployeesArea');
-  area.innerHTML = draft.pdfFuncionarios.map((f, fi) => `
-    <div style="border:1px solid var(--line);border-radius:2px;padding:16px 18px;margin-top:14px;">
-      <div class="row" style="margin-bottom:10px;">
-        <div><label>Nome</label><input type="text" data-fi="${fi}" class="pdfNome" value="${escapeHtml(f.nome)}"></div>
-        <div><label>CPF ${f.cpf ? '<span class="badge p">⚡ casado por nome</span>' : '<span class="badge i">preencher</span>'}</label><input type="text" data-fi="${fi}" class="pdfCpf" value="${escapeHtml(f.cpf)}" placeholder="000.000.000-00"></div>
-      </div>
-      <table>
-        <tr><th>Descrição</th><th>Tipo</th><th>Valor</th></tr>
-        ${f.itens.map((it, ii) => `
-          <tr>
-            <td>${escapeHtml(it.descricao)}</td>
-            <td><select data-fi="${fi}" data-ii="${ii}" class="pdfTipo">
-              <option value="provento" ${it.tipo==='provento'?'selected':''}>+ Provento</option>
-              <option value="desconto" ${it.tipo==='desconto'?'selected':''}>&minus; Desconto</option>
-            </select></td>
-            <td class="num">${fmtBRL(it.valor)}</td>
-          </tr>
-        `).join('')}
-      </table>
-    </div>
-  `).join('');
-
-  document.querySelectorAll('.pdfNome').forEach(inp => inp.oninput = e => { draft.pdfFuncionarios[e.target.getAttribute('data-fi')].nome = e.target.value; });
-  document.querySelectorAll('.pdfCpf').forEach(inp => inp.oninput = e => { draft.pdfFuncionarios[e.target.getAttribute('data-fi')].cpf = onlyDigits(e.target.value); });
-  document.querySelectorAll('.pdfTipo').forEach(sel => sel.onchange = e => { draft.pdfFuncionarios[e.target.getAttribute('data-fi')].itens[e.target.getAttribute('data-ii')].tipo = e.target.value; });
-}
-
 function renderReview(){
   document.getElementById('cardReview').style.display = 'block';
   const tbody = document.getElementById('colTableBody');
@@ -647,7 +493,7 @@ function renderReview(){
         <select data-col="${escapeHtml(h)}" class="colType">
           <option value="ignorar" ${m.tipo==='ignorar'?'selected':''}>Ignorar</option>
           <option value="nome" ${m.tipo==='nome'?'selected':''}>Nome</option>
-          <option value="cpf" ${m.tipo==='cpf'?'selected':''}>CPF</option>
+          <option value="matricula" ${m.tipo==='matricula'?'selected':''}>Matrícula</option>
           <option value="provento" ${m.tipo==='provento'?'selected':''}>+ Provento</option>
           <option value="desconto" ${m.tipo==='desconto'?'selected':''}>&minus; Desconto</option>
           <option value="revisar" ${m.tipo==='revisar'?'selected':''}>? Revisar</option>
@@ -664,32 +510,20 @@ function renderReview(){
 function updateSummary(){
   const pending = Object.values(draft.mapping).filter(m=>m.tipo==='revisar').length;
   const hasNome = Object.values(draft.mapping).some(m=>m.tipo==='nome');
-  const hasCpf = Object.values(draft.mapping).some(m=>m.tipo==='cpf');
-  document.getElementById('summaryLine').textContent = `${pending} coluna(s) pendente(s) de revisão. Nome: ${hasNome?'ok':'faltando'} · CPF: ${hasCpf?'ok':'faltando'}`;
-  document.getElementById('btnPush').disabled = pending>0 || !hasNome || !hasCpf || !draft.period;
-  document.getElementById('btnAI').onclick = async () => {
-    const pending2 = Object.keys(draft.mapping).filter(h=>draft.mapping[h].tipo==='revisar');
-    const msg = document.getElementById('aiMsg');
-    if(pending2.length===0){ msg.innerHTML='<div class="muted">Nenhuma coluna pendente.</div>'; return; }
-    msg.innerHTML = '<div class="muted">consultando IA...</div>';
-    try{
-      const result = await classifyWithAI(pending2);
-      pending2.forEach(h => { const t = result[h]; if(t==='provento'||t==='desconto'||t==='ignorar') draft.mapping[h] = { tipo: t, source: 'ai' }; });
-      msg.innerHTML = '<div class="ok">Classificação da IA aplicada — confira antes de enviar.</div>';
-      renderReview();
-    }catch(e){ msg.innerHTML = `<div class="error">Falha na classificação por IA: ${escapeHtml(e.message||e)}</div>`; }
-  };
+  const hasMatricula = Object.values(draft.mapping).some(m=>m.tipo==='matricula');
+  document.getElementById('summaryLine').textContent = `${pending} coluna(s) pendente(s) de revisão. Nome: ${hasNome?'ok':'faltando'} · Matrícula: ${hasMatricula?'ok':'faltando'}`;
+  document.getElementById('btnPush').disabled = pending>0 || !hasNome || !hasMatricula || !draft.period;
   document.getElementById('btnPush').onclick = async () => {
     const msg = document.getElementById('pushMsg');
     msg.innerHTML = '<div class="muted">enviando...</div>';
     try{
       const nomeCol = Object.keys(draft.mapping).find(h=>draft.mapping[h].tipo==='nome');
-      const cpfCol = Object.keys(draft.mapping).find(h=>draft.mapping[h].tipo==='cpf');
+      const matriculaCol = Object.keys(draft.mapping).find(h=>draft.mapping[h].tipo==='matricula');
       const valueCols = Object.keys(draft.mapping).filter(h=>['provento','desconto'].includes(draft.mapping[h].tipo));
       const rows = draft.rawRows.map(r => ({
-        cpf: onlyDigits(r[cpfCol]), nome: r[nomeCol],
+        matricula: (r[matriculaCol]||'').trim(), nome: r[nomeCol],
         items: valueCols.map(h => ({ descricao: h, tipo: draft.mapping[h].tipo, valor: parseBRL(r[h]) })).filter(i => i.valor !== 0)
-      })).filter(r => r.cpf && r.nome);
+      })).filter(r => r.matricula && r.nome);
       const res = await callApi('admin_push', { secret: adminSecret, period_label: draft.period, rows });
       if(!res.ok) throw new Error(res.error);
       msg.innerHTML = `<div class="ok">Período "${escapeHtml(draft.period)}" enviado — ${res.count} colaborador(es) processado(s).</div>`;
