@@ -91,7 +91,7 @@
 /* ======= CONFIGURAR ANTES DE DISTRIBUIR ======= */
 const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbyl1nm-qU-cj2ucxrtH40q4gZTXcuRrodig8xcANkQXInazRv6dKhjJv7J8zBsjqHyQSQ/exec';
 const COMPANY_NAME = 'Blincast Media';
-const APP_VERSION = 'v16';
+const APP_VERSION = 'v18';
 /* =============================================== */
 
 function ensurePdfJs(){
@@ -674,7 +674,12 @@ async function loadEmployeeList(){
     sel.onchange = () => loadEmployeePayslip(sel.value);
   }catch(e){
     sel.innerHTML = '<option value="">Erro ao carregar</option>';
-    document.getElementById('adminSlipArea').innerHTML = `<div class="error">${escapeHtml(e.message||e)}</div>`;
+    document.getElementById('adminSlipArea').innerHTML = `
+      <div class="error">Não consegui carregar a lista agora (falha de comunicação passageira). Tenta de novo.</div>
+      <div style="margin-top:10px;"><button class="ghost auto" id="btnRetryEmpList">Tentar de novo</button></div>
+    `;
+    const btn = document.getElementById('btnRetryEmpList');
+    if(btn) btn.onclick = () => loadEmployeeList();
   }
 }
 
@@ -774,6 +779,7 @@ function renderPdfEmployeesArea(){
           </tr>
         `).join('')}
       </table>
+      <div style="margin-top:14px;"><button class="ghost auto" id="btnPdfRemove" style="color:var(--bad);border-color:var(--bad);">Remover este colaborador da lista</button></div>
     </div>
   `;
 
@@ -784,6 +790,16 @@ function renderPdfEmployeesArea(){
   const btnNext = document.getElementById('btnPdfNext');
   if(btnPrev) btnPrev.onclick = () => { pdfIndex--; renderPdfEmployeesArea(); };
   if(btnNext) btnNext.onclick = () => { pdfIndex++; renderPdfEmployeesArea(); };
+  document.getElementById('btnPdfRemove').onclick = () => {
+    const removido = pdfDraft.funcionarios.splice(fi, 1)[0];
+    const msg = document.getElementById('parseMsg');
+    if(msg) msg.innerHTML = `<div class="ok">"${escapeHtml(removido.nome)}" removido da lista — os outros ${pdfDraft.funcionarios.length} continuam prontos pra enviar. Suba o PDF dele separado depois de corrigir.</div>`;
+    if(pdfDraft.funcionarios.length === 0){
+      document.getElementById('cardReviewPdf').style.display = 'none';
+      return;
+    }
+    renderPdfEmployeesArea();
+  };
 }
 
 function renderReview(){
