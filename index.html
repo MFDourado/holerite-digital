@@ -1,0 +1,808 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Holerite Digital · Blincast</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --graphite:#202123; --graphite-deep:#141519; --gold:#FAC11C; --gold-deep:#E0A90A;
+    --paper:#F6F6F4; --paper-raised:#FFFFFF; --ink:#1F2127; --ink-soft:#6B6E76;
+    --line:#E4E3DE; --line-soft:#EEEDE8;
+    --good:#2B8A5A; --good-bg:#E8F5EE; --bad:#C2483A; --bad-bg:#FBEAE7;
+    --warn:#8A6A00; --warn-bg:#FBF1D2;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:'Inter',system-ui,sans-serif;min-height:100vh;padding:0 0 80px;}
+  .num{font-family:'IBM Plex Mono',monospace;}
+  .wrap{max-width:960px;margin:0 auto;padding:32px 20px 0;}
+  #app{max-width:420px;margin:20px auto 0;}
+  #app.wide{max-width:960px;margin-top:0;}
+  h1{font-size:23px;font-weight:800;margin:0 0 6px;text-align:center;letter-spacing:-.2px;}
+  h2{font-size:16px;font-weight:700;margin:0 0 4px;letter-spacing:-.1px;}
+  p.sub{color:var(--ink-soft);font-size:14px;margin:0 0 26px;text-align:center;}
+  p.hint{color:var(--ink-soft);font-size:13.5px;margin:0 0 16px;line-height:1.55;}
+  label{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin:0 0 6px;}
+  input[type=text],input[type=password],textarea{width:100%;border:1.5px solid var(--line);background:#fff;color:var(--ink);font-family:'Inter',sans-serif;font-size:14px;padding:12px;border-radius:8px;margin-bottom:14px;}
+  input:focus,textarea:focus,select:focus{outline:none;border-color:var(--gold-deep);box-shadow:0 0 0 3px rgba(250,193,28,.25);}
+  textarea{min-height:140px;resize:vertical;line-height:1.5;font-family:'IBM Plex Mono',monospace;font-size:13px;}
+  .row{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;}
+  .row > div{flex:1;min-width:200px;}
+  button{width:100%;font-family:'Inter',sans-serif;font-weight:700;font-size:14px;border:none;background:var(--gold);color:var(--graphite);padding:13px 18px;border-radius:8px;cursor:pointer;transition:background .15s;}
+  button:hover{background:var(--gold-deep);}
+  button.ghost{background:transparent;color:var(--graphite);border:1.5px solid var(--line);}
+  button.ghost:hover{background:var(--line-soft);}
+  button:disabled{opacity:.45;cursor:not-allowed;}
+  button.auto{width:auto;}
+  .switch{text-align:center;margin-top:16px;font-size:12.5px;color:var(--ink-soft);}
+  .switch a{color:var(--graphite);font-weight:600;cursor:pointer;text-decoration:underline;}
+  .error{color:var(--bad);font-size:13px;margin:-6px 0 14px;}
+  .ok{color:var(--good);font-size:13px;margin:8px 0;}
+  .muted{color:var(--ink-soft);font-size:12.5px;}
+
+  .brandbar{background:var(--graphite);padding:18px 20px;display:flex;justify-content:center;}
+  .brandbar img{height:34px;display:block;}
+  .verstag{text-align:center;font-size:10.5px;color:var(--ink-soft);padding:6px 0 0;font-family:'IBM Plex Mono',monospace;}
+
+  .topbar{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid var(--graphite);padding-bottom:14px;margin-bottom:26px;}
+  .topbar .who{font-size:13px;font-weight:600;color:var(--ink-soft);}
+  .topbar button{width:auto;padding:8px 14px;}
+  select.period{font-size:13px;font-weight:600;border:1.5px solid var(--line);border-radius:8px;padding:9px 12px;background:#fff;margin-bottom:18px;}
+
+  .slip{background:var(--paper-raised);border:1px solid var(--line);border-radius:14px;padding:32px 36px;box-shadow:0 1px 3px rgba(31,33,39,.06);}
+  .slip-head{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:16px;margin-bottom:16px;}
+  .slip-head .co{font-size:17px;font-weight:800;}
+  .slip-head .period{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--ink-soft);text-align:right;}
+  .slip-who .name{font-size:18px;font-weight:700;margin-bottom:20px;}
+  .cols{display:flex;gap:28px;}
+  .cols>div{flex:1;}
+  .col-title{font-size:11px;font-weight:700;letter-spacing:.4px;color:var(--ink-soft);border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:8px;}
+  .line-item{display:flex;justify-content:space-between;font-size:13.5px;padding:5px 0;}
+  .v.pos{color:var(--good);font-family:'IBM Plex Mono',monospace;}
+  .v.neg{color:var(--bad);font-family:'IBM Plex Mono',monospace;}
+  .subtotal{display:flex;justify-content:space-between;font-size:13.5px;padding-top:8px;margin-top:6px;border-top:1px solid var(--line-soft);font-weight:700;}
+  .liquido{margin-top:24px;padding:18px 22px;background:var(--graphite);color:var(--gold);display:flex;justify-content:space-between;align-items:center;border-radius:10px;}
+  .liquido span:first-child{font-size:12px;font-weight:700;letter-spacing:.4px;color:#fff;}
+  .liquido .amt{font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:700;}
+
+  .card{background:var(--paper-raised);border:1px solid var(--line);border-radius:14px;padding:26px 28px;margin-bottom:20px;box-shadow:0 1px 3px rgba(31,33,39,.05);}
+  table{width:100%;border-collapse:collapse;margin-top:10px;}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line-soft);font-size:13px;}
+  th{font-size:10.5px;font-weight:700;letter-spacing:.3px;color:var(--ink-soft);text-transform:uppercase;}
+  select{font-size:13px;border:1.5px solid var(--line);border-radius:6px;padding:6px 8px;background:#fff;}
+  .badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:6px;}
+  .badge.p{background:var(--good-bg);color:var(--good);}
+  .badge.ai{background:var(--warn-bg);color:var(--warn);}
+  .badge.i{background:var(--line-soft);color:var(--ink-soft);}
+  input[type=file]{font-size:12.5px;}
+
+  @media print{ .no-print{display:none !important;} body{padding:0;} .slip{border:none;padding:0;} }
+  @media (max-width:600px){ .cols{flex-direction:column;} .slip{padding:22px 20px;} }
+</style>
+</head>
+<body>
+<div class="brandbar no-print"><img src="data:image/jpeg;base64,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" alt="Blincast"></div>
+<div class="wrap"><div id="app"></div></div>
+
+<script>
+/* ======= CONFIGURAR ANTES DE DISTRIBUIR ======= */
+const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbyl1nm-qU-cj2ucxrtH40q4gZTXcuRrodig8xcANkQXInazRv6dKhjJv7J8zBsjqHyQSQ/exec';
+const COMPANY_NAME = 'Blincast Media';
+const APP_VERSION = 'v14';
+/* =============================================== */
+
+function ensurePdfJs(){
+  if(window.pdfjsLib) return Promise.resolve();
+  if(window.__pdfLibPromise) return window.__pdfLibPromise;
+  window.__pdfLibPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    s.onload = () => {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      resolve();
+    };
+    s.onerror = () => reject(new Error('Não consegui carregar a biblioteca de leitura de PDF. Confira sua internet (ou se algum firewall/bloqueador está travando cdnjs.cloudflare.com) e tente de novo.'));
+    document.head.appendChild(s);
+  });
+  return window.__pdfLibPromise;
+}
+
+const app = document.getElementById('app');
+window.addEventListener('error', function(ev){
+  if(app && !app.innerHTML.trim()){
+    app.className = '';
+    app.innerHTML = `<div class="error" style="text-align:left;white-space:pre-wrap;">Erro ao carregar a página:\n${(ev.message||'desconhecido').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}\n\nManda um print dessa mensagem pro suporte.</div>`;
+  }
+});
+const verspanEl = document.getElementById('verspan');
+if(verspanEl) verspanEl.textContent = APP_VERSION;
+function onlyDigits(s){ return (s||'').replace(/\D/g,''); }
+function fmtBRL(n){ return (n||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function normalize(s){ return (s||'').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim(); }
+function parseBRL(str){
+  if(typeof str==='number') return str;
+  if(!str) return 0;
+  let s=String(str).replace(/[^\d,.\-]/g,'').trim();
+  if(s.indexOf(',')>-1 && s.indexOf('.')>-1) s=s.replace(/\./g,'').replace(',', '.');
+  else if(s.indexOf(',')>-1) s=s.replace(',', '.');
+  const v=parseFloat(s); return isNaN(v)?0:v;
+}
+
+async function callApi(action, payload){
+  const resp = await fetch(WEBAPP_URL, {
+    method: 'POST',
+    headers: {'Content-Type': 'text/plain;charset=utf-8'},
+    body: JSON.stringify({action, ...payload})
+  });
+  return resp.json();
+}
+
+let mode = 'login'; // login | signup | admin_gate | admin
+let session = null;
+
+/* ================= LOGIN / SIGNUP (colaborador) ================= */
+function renderAuth(errorMsg){
+  app.className = '';
+  app.innerHTML = `
+    <h1>${escapeHtml(COMPANY_NAME)}</h1>
+    <p class="sub">${mode==='login' ? 'entre com sua matrícula e senha' : 'primeiro acesso — crie sua senha'}</p>
+    <label>Matrícula</label>
+    <input type="text" id="matricula" inputmode="numeric" placeholder="Ex: 78">
+    <label>Senha</label>
+    <input type="password" id="senha" placeholder="mínimo 6 caracteres">
+    ${errorMsg ? `<div class="error">${escapeHtml(errorMsg)}</div>` : ''}
+    <button id="btnGo">${mode==='login' ? 'Entrar' : 'Criar senha e entrar'}</button>
+    <div class="switch">
+      ${mode==='login'
+        ? 'primeiro acesso? <a id="toSignup">criar senha</a>'
+        : 'já tem senha? <a id="toLogin">entrar</a>'}
+      <br><a id="toAdmin" style="margin-top:6px;display:inline-block;">área do gestor</a>
+    </div>
+  `;
+  document.getElementById('btnGo').onclick = mode==='login' ? doLogin : doSignup;
+  const s = document.getElementById('toSignup'); if(s) s.onclick = () => { mode='signup'; renderAuth(); };
+  const l = document.getElementById('toLogin'); if(l) l.onclick = () => { mode='login'; renderAuth(); };
+  document.getElementById('toAdmin').onclick = () => { mode='admin_gate'; renderAdminGate(); };
+}
+
+async function doLogin(){
+  const matricula = document.getElementById('matricula').value.trim();
+  const senha = document.getElementById('senha').value;
+  if(!matricula || senha.length<6){ renderAuth('Confira a matrícula e a senha.'); return; }
+  document.getElementById('btnGo').disabled = true;
+  let res;
+  try{ res = await callApi('login', {matricula, senha}); }
+  catch(e){ renderAuth('Não consegui falar com o servidor. Confira sua internet e tente de novo.'); return; }
+  if(!res.ok){ renderAuth(res.error); return; }
+  session = res;
+  renderPortal(session.periods[0] ? session.periods[0].id : null);
+}
+
+async function doSignup(){
+  const matricula = document.getElementById('matricula').value.trim();
+  const senha = document.getElementById('senha').value;
+  if(!matricula || senha.length<6){ renderAuth('Confira a matrícula e a senha (mínimo 6 caracteres).'); return; }
+  document.getElementById('btnGo').disabled = true;
+  let res;
+  try{ res = await callApi('signup', {matricula, senha}); }
+  catch(e){ renderAuth('Não consegui falar com o servidor. Confira sua internet e tente de novo.'); return; }
+  if(!res.ok){ renderAuth(res.error); return; }
+  session = res;
+  renderPortal(session.periods[0] ? session.periods[0].id : null);
+}
+
+/* ================= PORTAL (colaborador logado) ================= */
+function renderPortal(selectedPeriodId){
+  app.className = 'wide';
+  const opts = session.periods.map(p => `<option value="${p.id}" ${p.id===selectedPeriodId?'selected':''}>${escapeHtml(p.label)}</option>`).join('');
+  const lines = session.lines.filter(l => l.period_id === selectedPeriodId);
+  const proventos = lines.filter(l=>l.tipo==='provento');
+  const descontos = lines.filter(l=>l.tipo==='desconto');
+  const totalP = proventos.reduce((a,l)=>a+Number(l.valor),0);
+  const totalD = descontos.reduce((a,l)=>a+Number(l.valor),0);
+  const periodLabel = (session.periods.find(p=>p.id===selectedPeriodId)||{}).label || '';
+
+  app.innerHTML = `
+    <div style="max-width:860px;margin:0 auto;">
+    <div class="topbar no-print">
+      <div class="who">${escapeHtml(session.nome)}</div>
+      <button class="ghost auto" id="btnLogout">Sair</button>
+    </div>
+    ${session.periods.length ? `<select class="period no-print" id="periodSelect">${opts}</select>` : '<p class="sub" style="text-align:left">Nenhum contracheque disponível ainda.</p>'}
+    ${session.periods.length ? `
+    <div class="slip">
+      <div class="slip-head">
+        <div class="co">${escapeHtml(COMPANY_NAME)}</div>
+        <div class="period">RECIBO DE PAGAMENTO<br>${escapeHtml(periodLabel)}</div>
+      </div>
+      <div class="slip-who"><div class="name">${escapeHtml(session.nome)}</div></div>
+      <div class="cols">
+        <div>
+          <div class="col-title">PROVENTOS</div>
+          ${proventos.map(l=>`<div class="line-item"><span>${escapeHtml(l.descricao)}</span><span class="v pos num">${fmtBRL(Number(l.valor))}</span></div>`).join('') || '<div class="line-item"><span>—</span><span></span></div>'}
+          <div class="subtotal"><span>Total de proventos</span><span class="num">${fmtBRL(totalP)}</span></div>
+        </div>
+        <div>
+          <div class="col-title">DESCONTOS</div>
+          ${descontos.map(l=>`<div class="line-item"><span>${escapeHtml(l.descricao)}</span><span class="v neg num">${fmtBRL(Number(l.valor))}</span></div>`).join('') || '<div class="line-item"><span>—</span><span></span></div>'}
+          <div class="subtotal"><span>Total de descontos</span><span class="num">${fmtBRL(totalD)}</span></div>
+        </div>
+      </div>
+      <div class="liquido"><span>LÍQUIDO A RECEBER</span><span class="amt">R$ ${fmtBRL(totalP-totalD)}</span></div>
+    </div>
+    <div class="no-print" style="margin-top:18px;"><button class="auto" id="btnPrint">Imprimir / salvar como PDF</button></div>
+    ` : ''}
+    </div>
+  `;
+  document.getElementById('btnLogout').onclick = () => { session=null; mode='login'; renderAuth(); };
+  const sel = document.getElementById('periodSelect');
+  if(sel) sel.onchange = e => renderPortal(e.target.value);
+  const pb = document.getElementById('btnPrint');
+  if(pb) pb.onclick = () => window.print();
+}
+
+/* ================= ÁREA DO GESTOR ================= */
+let adminSecret = localStorage.getItem('hd_admin_secret') || '';
+let adminRole = null;
+let draft = { headers:[], rawRows:[], mapping:{}, period:'' };
+
+function renderAdminGate(errorMsg){
+  app.className = '';
+  app.innerHTML = `
+    <h1>Área do gestor</h1>
+    <p class="sub">informe seu segredo de acesso</p>
+    <label>Segredo de acesso</label>
+    <input type="password" id="secretInput" value="${escapeHtml(adminSecret)}">
+    ${errorMsg ? `<div class="error">${escapeHtml(errorMsg)}</div>` : ''}
+    <button id="btnGateGo">Entrar</button>
+    <div class="switch"><a id="backLogin">voltar pro login</a></div>
+  `;
+  document.getElementById('backLogin').onclick = () => { mode='login'; renderAuth(); };
+  document.getElementById('btnGateGo').onclick = async () => {
+    const tentativa = document.getElementById('secretInput').value.trim();
+    if(!tentativa){ renderAdminGate('Informe o segredo.'); return; }
+    document.getElementById('btnGateGo').disabled = true;
+    try{
+      const res = await callApi('admin_whoami', { secret: tentativa });
+      if(!res.ok) throw new Error(res.error);
+      adminSecret = tentativa;
+      adminRole = res.role;
+      localStorage.setItem('hd_admin_secret', adminSecret);
+      mode = 'admin';
+      renderAdmin();
+    }catch(e){
+      renderAdminGate('Segredo inválido.');
+    }
+  };
+}
+
+const PROVENTO_TERMS = ['salario base','salario','vencimento','comissao','comissoes','bonus','hora extra','horas extras',
+  'adicional noturno','adicional','gratificacao','ajuda de custo','ppr','participacao nos lucros','ferias','13o salario',
+  'decimo terceiro','decimo 3','premio','insalubridade','periculosidade','dsr','abono','reembolso','beneficio','remuneracao variavel'];
+const DESCONTO_TERMS = ['inss','irrf','ir ','imposto de renda','vale transporte','vale-transporte','vt ','vale refeicao',
+  'vale-refeicao','desconto','falta','atraso','pensao alimenticia','contribuicao sindical','emprestimo','coparticipacao',
+  'plano de saude','plano saude','adiantamento salarial','adiantamento'];
+const IGNORE_TERMS = ['nome','colaborador','funcionario','cpf','matricula','cargo','departamento','centro de custo',
+  'admissao','fgts','liquido','total','base de calculo','base calculo'];
+
+function dictClassify(header){
+  const h = normalize(header);
+  if(IGNORE_TERMS.some(t=>h.includes(t))){
+    if(h.includes('matricula')||h.includes('codigo')) return 'matricula';
+    if(h.includes('nome')||h.includes('colaborador')||h.includes('funcionario')) return 'nome';
+    return 'ignorar';
+  }
+  if(DESCONTO_TERMS.some(t=>h.includes(t))) return 'desconto';
+  if(PROVENTO_TERMS.some(t=>h.includes(t))) return 'provento';
+  return null;
+}
+
+function parseCsv(text){
+  const lines = text.split(/\r?\n/).filter(l=>l.trim().length>0);
+  if(lines.length<2) return null;
+  const delim = lines[0].split('\t').length > lines[0].split(',').length ? '\t' : ',';
+  const headers = lines[0].split(delim).map(h=>h.trim());
+  const rows = lines.slice(1).map(line=>{
+    const cells = line.split(delim); const obj={};
+    headers.forEach((h,i)=>obj[h]=(cells[i]||'').trim());
+    return obj;
+  });
+  return {headers, rows};
+}
+
+/* ---------- leitura de PDF (holerite Blincast: Código/Descrição/Referência/Vencimentos/Descontos) ---------- */
+async function pdfToPayrollRows(file){
+  await ensurePdfJs();
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+  let allLines = [];
+  for(let p=1; p<=pdf.numPages; p++){
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    const items = content.items.map(it => ({ text: it.str, x: it.transform[4], y: Math.round(it.transform[5]) })).filter(it => it.text.trim().length>0);
+    const byY = {};
+    items.forEach(it => { const key = Math.round(it.y/3)*3; (byY[key]=byY[key]||[]).push(it); });
+    const ys = Object.keys(byY).map(Number).sort((a,b)=>b-a);
+    ys.forEach(y => allLines.push(byY[y].sort((a,b)=>a.x-b.x)));
+  }
+
+  const rowText = row => row.map(it=>it.text).join(' ');
+  const normRow = row => normalize(rowText(row));
+  function snap(row, anchors){
+    const cells = anchors.map(()=>[]);
+    row.forEach(it=>{
+      let best=0, bestDist=Infinity;
+      anchors.forEach((ax,i)=>{ const d=Math.abs(ax-it.x); if(d<bestDist){bestDist=d; best=i;} });
+      cells[best].push(it.text);
+    });
+    return cells.map(c=>c.join(' ').trim());
+  }
+  function moneyVal(s){
+    if(!s) return 0;
+    if(/^\d{1,2}:\d{2}$/.test(s.trim())) return 0; // é hora (coluna Referência), não valor
+    if(!/\d/.test(s)) return 0;
+    return parseBRL(s);
+  }
+  function limparDescricao(s){ return s.replace(/\.\s*$/,'').replace(/\s+/g,' ').trim(); }
+
+  const ANCHORS_FUNC = [19, 51, 377, 431, 490];       // código | nome | cbo | departamento | filial
+  const ANCHORS_ITEM = [6, 135, 291, 370, 454];       // código | descrição | referência | vencimentos | descontos
+
+  const funcionariosBrutos = [];
+  let periodo = '';
+  let atual = null;
+  let coletandoItens = false;
+
+  for(let i=0; i<allLines.length; i++){
+    const row = allLines[i];
+    const nrow = normRow(row);
+
+    if(!periodo){
+      const m = rowText(row).match(/([A-Za-zÀ-úà-ú]+)\s+de\s+(\d{4})/);
+      if(m) periodo = `${m[1]}/${m[2]}`;
+    }
+
+    if(nrow.includes('nome') && nrow.includes('funcionario') && nrow.includes('cbo') && allLines[i+1]){
+      const cells = snap(allLines[i+1], ANCHORS_FUNC);
+      const matricula = (cells[0]||'').trim();
+      const nome = (cells[1]||'').trim();
+      if(matricula && nome){
+        if(atual && atual.itens.length) funcionariosBrutos.push(atual);
+        atual = { matricula, nome, itens: [] };
+        coletandoItens = false;
+      }
+      continue;
+    }
+
+    if(nrow.includes('codigo') && nrow.includes('descricao') && nrow.includes('vencimentos') && nrow.includes('descontos')){
+      coletandoItens = true;
+      continue;
+    }
+
+    if(coletandoItens){
+      if(nrow.includes('total') && (nrow.includes('vencimentos') || nrow.includes('descontos'))){
+        coletandoItens = false;
+        continue;
+      }
+      const cells = snap(row, ANCHORS_ITEM);
+      const descricao = limparDescricao(cells[1]||'');
+      const vencimento = moneyVal(cells[3]);
+      const desconto = moneyVal(cells[4]);
+      if(atual && descricao){
+        if(vencimento) atual.itens.push({descricao, tipo:'provento', valor:vencimento});
+        if(desconto) atual.itens.push({descricao, tipo:'desconto', valor:desconto});
+      }
+    }
+  }
+  if(atual && atual.itens.length) funcionariosBrutos.push(atual);
+
+  // remove duplicatas (vias repetidas do mesmo holerite) — mantém só a 1ª ocorrência por matrícula
+  const vistos = new Set();
+  const funcionarios = funcionariosBrutos.filter(f=>{
+    if(vistos.has(f.matricula)) return false;
+    vistos.add(f.matricula);
+    return true;
+  });
+
+  return { periodo, funcionarios };
+}
+
+function renderAdmin(){
+  app.className = 'wide';
+  const isRh = adminRole === 'rh';
+  app.innerHTML = `
+    <div class="topbar no-print">
+      <div class="who">área do gestor · ${isRh ? 'RH (acesso total)' : 'setor operacional'}</div>
+      <button class="ghost auto" id="btnAdminExit">Sair do modo gestor</button>
+    </div>
+
+    <div class="card">
+      <h2>1. Cadastrar colaboradores</h2>
+      <p class="hint">Cadastro individual (nome + matrícula) ou importação em massa colando uma lista. Isso libera o "primeiro acesso" antes mesmo da folha chegar. A matrícula é o mesmo número que aparece como "Código" no holerite.${isRh ? '' : ' Só matrículas do setor operacional podem ser cadastradas por aqui.'}</p>
+      <div class="row">
+        <div><label>Nome completo</label><input type="text" id="newEmpNome" placeholder="Ex: João da Silva"></div>
+        <div><label>Matrícula</label><input type="text" id="newEmpMatricula" placeholder="Ex: 78"></div>
+      </div>
+      <button class="auto" id="btnAddEmp">Cadastrar colaborador</button>
+      <div id="addEmpMsg"></div>
+      <hr style="border:none;border-top:1px solid var(--line-soft);margin:18px 0;">
+      <label>Importar lista (uma linha por pessoa — nome, e a matrícula na última coluna; colunas do meio são ignoradas)</label>
+      <textarea id="bulkImportInput" placeholder="Nome Completo	cargo (opcional)	78"></textarea>
+      <div style="margin-top:14px;"><button class="ghost auto" id="btnBulkImport">Importar lista</button></div>
+      <div id="bulkImportMsg"></div>
+    </div>
+
+    <div class="card">
+      <h2>2. Enviar a folha do mês</h2>
+      <p class="hint">Cole os dados direto do Excel/Sheets, ou anexe um arquivo .xlsx/.xls/.csv. Se sua folha só existir em PDF, me manda o PDF na nossa conversa que eu transcrevo pra um formato que cola aqui.${isRh ? '' : ' Linhas de matrículas fora do setor operacional são ignoradas automaticamente.'}</p>
+      <div class="row">
+        <div><label>Referência do período</label><input type="text" id="period" placeholder="Ex: Agosto/2026"></div>
+        <div><label>Arquivo (opcional — pode escolher vários PDFs de uma vez)</label><input type="file" id="dataFile" accept=".xlsx,.xls,.csv,.pdf" multiple></div>
+      </div>
+      <label>Dados (colados do Excel/Sheets, ou preenchidos automaticamente ao anexar o arquivo)</label>
+      <textarea id="csvInput" placeholder="Nome	Matrícula	Salário Base	INSS	IRRF	Vale Transporte"></textarea>
+      <div style="margin-top:14px;"><button class="auto" id="btnParse">Processar e classificar automaticamente</button></div>
+      <div id="parseMsg"></div>
+    </div>
+
+    <div class="card" id="cardReviewPdf" style="display:none;">
+      <h2>3. Conferência rápida (PDF)</h2>
+      <p class="hint">Nome, matrícula e período lidos direto do PDF — confira os itens antes de enviar. Se um item veio classificado errado (provento/desconto), corrige no menu.</p>
+      <div class="row"><div><label>Período detectado</label><input type="text" id="pdfPeriodo"></div></div>
+      <div id="pdfEmployeesArea"></div>
+      <div style="margin-top:14px;"><button class="auto" id="btnPushPdf">Enviar para a planilha</button></div>
+      <div id="pushPdfMsg"></div>
+    </div>
+
+    <div class="card" id="cardReview" style="display:none;">
+      <h2>3. Conferência rápida</h2>
+      <p class="hint">Classificação automática por dicionário de termos de folha (⚡). Colunas não reconhecidas ficam marcadas como "revisar" — escolha manualmente no menu.</p>
+      <table><tr><th>Coluna</th><th>Amostra</th><th>Classificação</th></tr><tbody id="colTableBody"></tbody></table>
+      <hr style="border:none;border-top:1px solid var(--line-soft);margin:18px 0;">
+      <div class="muted" id="summaryLine"></div>
+      <div style="margin-top:14px;"><button class="auto" id="btnPush">Enviar para a planilha</button></div>
+      <div id="pushMsg"></div>
+    </div>
+
+    <div class="card">
+      <h2>4. Ver contracheques dos colaboradores</h2>
+      <p class="hint">Escolha um colaborador pra ver os contracheques dele (últimos 12 meses), do mesmo jeito que ele vê.${isRh ? '' : ' Só aparecem os colaboradores do setor operacional.'}</p>
+      <div class="row">
+        <div><label>Colaborador</label><select id="empSelect"><option value="">Carregando...</option></select></div>
+      </div>
+      <div id="adminSlipArea"></div>
+    </div>
+
+    ${isRh ? `
+    <div class="card">
+      <h2>5. Manter só o setor operacional</h2>
+      <p class="hint">Se alguém subir a folha da empresa toda aqui (todos os setores), use isto pra ver quem não faz parte da lista de matrículas do operacional e removê-los desta plataforma — a lista de matrículas permitidas fica na aba "SetorOperacional" da planilha, você edita direto lá se precisar adicionar ou tirar alguém.</p>
+      <button class="ghost auto" id="btnPreviewCleanup">Ver quem seria removido</button>
+      <div id="cleanupArea"></div>
+    </div>
+    ` : ''}
+  `;
+  document.getElementById('btnAdminExit').onclick = () => { mode='login'; renderAuth(); };
+
+  document.getElementById('btnAddEmp').onclick = async () => {
+    const nome = document.getElementById('newEmpNome').value.trim();
+    const matricula = document.getElementById('newEmpMatricula').value.trim();
+    const msg = document.getElementById('addEmpMsg');
+    if(!nome || !matricula){ msg.innerHTML = '<div class="error">Preencha o nome e a matrícula.</div>'; return; }
+    msg.innerHTML = '<div class="muted">cadastrando...</div>';
+    try{
+      const res = await callApi('admin_add_employee', { secret: adminSecret, nome, matricula });
+      if(!res.ok) throw new Error(res.error);
+      msg.innerHTML = `<div class="ok">"${escapeHtml(nome)}" cadastrado(a) — já pode fazer o primeiro acesso pelo link do portal.</div>`;
+      document.getElementById('newEmpNome').value = '';
+      document.getElementById('newEmpMatricula').value = '';
+    }catch(e){
+      msg.innerHTML = `<div class="error">${escapeHtml(e.message||e)}</div>`;
+    }
+  };
+
+  document.getElementById('btnBulkImport').onclick = async () => {
+    const text = document.getElementById('bulkImportInput').value;
+    const msg = document.getElementById('bulkImportMsg');
+    const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(l=>l.length>0);
+    if(lines.length===0){ msg.innerHTML = '<div class="error">Cole ao menos uma linha.</div>'; return; }
+    const employees = lines.map(line => {
+      const cells = line.split('\t').map(c=>c.trim());
+      const nome = cells[0];
+      const matricula = cells[cells.length-1];
+      return {nome, matricula};
+    }).filter(e => e.nome && e.matricula);
+    if(employees.length===0){ msg.innerHTML = '<div class="error">Não consegui reconhecer nome/matrícula nas linhas coladas. Confira se está separado por tabulação (copiado direto do Excel/Sheets).</div>'; return; }
+    msg.innerHTML = '<div class="muted">importando...</div>';
+    try{
+      const res = await callApi('admin_bulk_add_employees', { secret: adminSecret, employees });
+      if(!res.ok) throw new Error(res.error);
+      msg.innerHTML = `<div class="ok">${res.added} cadastrado(s), ${res.skipped} ignorado(s) (já existiam ou matrícula inválida).</div>`;
+      document.getElementById('bulkImportInput').value = '';
+    }catch(e){
+      msg.innerHTML = `<div class="error">${escapeHtml(e.message||e)}</div>`;
+    }
+  };
+
+  const btnCleanup = document.getElementById('btnPreviewCleanup');
+  if(btnCleanup) btnCleanup.onclick = async () => {
+    const area = document.getElementById('cleanupArea');
+    area.innerHTML = '<p class="muted">verificando...</p>';
+    try{
+      const res = await callApi('admin_preview_nao_operacional', { secret: adminSecret });
+      if(!res.ok) throw new Error(res.error);
+      if(res.fora_do_setor.length === 0){
+        area.innerHTML = `<div class="ok">Nenhum colaborador fora do setor operacional (${res.total_permitidos} matrícula(s) permitida(s) no total). Nada pra remover.</div>`;
+        return;
+      }
+      area.innerHTML = `
+        <p class="hint" style="margin-top:14px;">${res.fora_do_setor.length} colaborador(es) <strong>não</strong> está(ão) na lista do setor operacional e será(ão) removido(s) — junto com todos os contracheques deles nesta plataforma. Essa ação não pode ser desfeita.</p>
+        <table><tr><th>Matrícula</th><th>Nome</th></tr>
+          ${res.fora_do_setor.map(e=>`<tr><td class="num">${escapeHtml(e.matricula)}</td><td>${escapeHtml(e.nome)}</td></tr>`).join('')}
+        </table>
+        <div style="margin-top:14px;"><button class="auto" id="btnConfirmCleanup" style="background:var(--bad);color:#fff;">Remover ${res.fora_do_setor.length} colaborador(es) definitivamente</button></div>
+        <div id="cleanupConfirmMsg"></div>
+      `;
+      document.getElementById('btnConfirmCleanup').onclick = async () => {
+        const msg = document.getElementById('cleanupConfirmMsg');
+        msg.innerHTML = '<div class="muted">removendo...</div>';
+        try{
+          const res2 = await callApi('admin_delete_nao_operacional', { secret: adminSecret });
+          if(!res2.ok) throw new Error(res2.error);
+          msg.innerHTML = `<div class="ok">${res2.colaboradores_removidos} colaborador(es) e ${res2.linhas_removidas} linha(s) de contracheque removidos.</div>`;
+          loadEmployeeList();
+        }catch(e){
+          msg.innerHTML = `<div class="error">${escapeHtml(e.message||e)}</div>`;
+        }
+      };
+
+    }catch(e){
+      area.innerHTML = `<div class="error">${escapeHtml(e.message||e)}</div>`;
+    }
+  };
+
+  document.getElementById('btnPushPdf').onclick = async () => {
+    const msg = document.getElementById('pushPdfMsg');
+    const periodo = document.getElementById('pdfPeriodo').value.trim();
+    if(!periodo){ msg.innerHTML = '<div class="error">Preencha o período detectado (ou corrija manualmente).</div>'; return; }
+    const semMatricula = pdfDraft.funcionarios.filter(f => !f.matricula);
+    if(semMatricula.length){ msg.innerHTML = `<div class="error">Falta matrícula pra: ${semMatricula.map(f=>escapeHtml(f.nome)).join(', ')}.</div>`; return; }
+    msg.innerHTML = '<div class="muted">enviando...</div>';
+    try{
+      const rows = pdfDraft.funcionarios.map(f => ({
+        matricula: f.matricula, nome: f.nome,
+        items: f.itens.filter(i => i.valor !== 0)
+      }));
+      const res = await callApi('admin_push', { secret: adminSecret, period_label: periodo, rows });
+      if(!res.ok) throw new Error(res.error);
+      const avisoFora = res.fora_do_setor_ignorados ? ` (${res.fora_do_setor_ignorados} fora do setor operacional, ignorado(s))` : '';
+      msg.innerHTML = `<div class="ok">Período "${escapeHtml(periodo)}" enviado — ${res.count} colaborador(es) processado(s)${avisoFora}.</div>`;
+    }catch(e){
+      msg.innerHTML = `<div class="error">Erro ao enviar: ${escapeHtml(e.message||e)}</div>`;
+    }
+  };
+
+  loadEmployeeList();
+
+  document.getElementById('period').oninput = (e) => { draft.period = e.target.value.trim(); if(draft.headers.length) updateSummary(); };
+
+  document.getElementById('dataFile').onchange = async (e) => {
+    const file = e.target.files[0];
+    if(!file) return;
+    const msg = document.getElementById('parseMsg');
+    const name = file.name.toLowerCase();
+    try{
+      if(name.endsWith('.pdf')){
+        document.getElementById('cardReview').style.display = 'none';
+        msg.innerHTML = '<div class="muted">lendo pdf...</div>';
+        const result = await pdfToPayrollRows(file);
+        if(!result.funcionarios.length){
+          msg.innerHTML = '<div class="error">Não consegui reconhecer nenhum holerite nesse PDF. Se ele for uma imagem/print (sem texto selecionável), me manda aqui no chat que eu transcrevo pra você.</div>';
+          return;
+        }
+        renderPdfReview(result);
+        msg.innerHTML = `<div class="ok">${result.funcionarios.length} colaborador(es) lido(s) do PDF. Confira a seção 3 antes de enviar.</div>`;
+      } else if(name.endsWith('.xlsx') || name.endsWith('.xls')){
+        document.getElementById('cardReviewPdf').style.display = 'none';
+        msg.innerHTML = '<div class="muted">lendo planilha...</div>';
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, {type:'array'});
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        document.getElementById('csvInput').value = XLSX.utils.sheet_to_csv(sheet, {FS: '\t'});
+        msg.innerHTML = `<div class="ok">Planilha lida (aba "${escapeHtml(wb.SheetNames[0])}"). Confira antes de processar.</div>`;
+      } else if(name.endsWith('.csv')){
+        document.getElementById('cardReviewPdf').style.display = 'none';
+        document.getElementById('csvInput').value = await file.text();
+        msg.innerHTML = '<div class="ok">CSV lido. Confira antes de processar.</div>';
+      } else {
+        msg.innerHTML = '<div class="error">Formato não reconhecido. Use PDF, .xlsx, .xls ou .csv.</div>';
+      }
+    }catch(err){
+      msg.innerHTML = `<div class="error">Não consegui ler o arquivo: ${escapeHtml(err.message||err)}</div>`;
+    }
+  };
+
+  document.getElementById('btnParse').onclick = () => {
+    const text = document.getElementById('csvInput').value;
+    const msg = document.getElementById('parseMsg');
+    const parsed = parseCsv(text);
+    if(!parsed){ msg.innerHTML = '<div class="error">Não consegui reconhecer linhas/colunas nos dados.</div>'; return; }
+    draft.headers = parsed.headers;
+    draft.rawRows = parsed.rows;
+    draft.mapping = {};
+    draft.headers.forEach(h => {
+      const guess = dictClassify(h);
+      draft.mapping[h] = { tipo: guess || 'revisar', source: guess ? 'dict' : 'none' };
+    });
+    msg.innerHTML = `<div class="ok">${parsed.rows.length} linha(s) lida(s).</div>`;
+    renderReview();
+  };
+}
+
+async function loadEmployeeList(){
+  const sel = document.getElementById('empSelect');
+  try{
+    const res = await callApi('admin_list_employees', { secret: adminSecret });
+    if(!res.ok) throw new Error(res.error);
+    sel.innerHTML = '<option value="">Selecione...</option>' + res.employees.map(e => `<option value="${escapeHtml(e.matricula)}">${escapeHtml(e.nome)}</option>`).join('');
+    sel.onchange = () => loadEmployeePayslip(sel.value);
+  }catch(e){
+    sel.innerHTML = '<option value="">Erro ao carregar</option>';
+    document.getElementById('adminSlipArea').innerHTML = `<div class="error">${escapeHtml(e.message||e)}</div>`;
+  }
+}
+
+async function loadEmployeePayslip(matricula){
+  const area = document.getElementById('adminSlipArea');
+  if(!matricula){ area.innerHTML=''; return; }
+  area.innerHTML = '<p class="muted">carregando...</p>';
+  try{
+    const res = await callApi('admin_payslip', { secret: adminSecret, matricula });
+    if(!res.ok) throw new Error(res.error);
+    renderAdminSlip(res, res.periods[0] ? res.periods[0].id : null);
+  }catch(e){
+    area.innerHTML = `<div class="error">${escapeHtml(e.message||e)}</div>`;
+  }
+}
+
+function renderAdminSlip(data, selectedPeriodId){
+  const area = document.getElementById('adminSlipArea');
+  const opts = data.periods.map(p => `<option value="${p.id}" ${p.id===selectedPeriodId?'selected':''}>${escapeHtml(p.label)}</option>`).join('');
+  const lines = data.lines.filter(l => l.period_id === selectedPeriodId);
+  const proventos = lines.filter(l=>l.tipo==='provento');
+  const descontos = lines.filter(l=>l.tipo==='desconto');
+  const totalP = proventos.reduce((a,l)=>a+Number(l.valor),0);
+  const totalD = descontos.reduce((a,l)=>a+Number(l.valor),0);
+  const periodLabel = (data.periods.find(p=>p.id===selectedPeriodId)||{}).label || '';
+
+  area.innerHTML = data.periods.length ? `
+    <select class="period" id="adminPeriodSelect">${opts}</select>
+    <div class="slip">
+      <div class="slip-head">
+        <div class="co">${escapeHtml(COMPANY_NAME)}</div>
+        <div class="period">RECIBO DE PAGAMENTO<br>${escapeHtml(periodLabel)}</div>
+      </div>
+      <div class="slip-who"><div class="name">${escapeHtml(data.nome)}</div></div>
+      <div class="cols">
+        <div>
+          <div class="col-title">PROVENTOS</div>
+          ${proventos.map(l=>`<div class="line-item"><span>${escapeHtml(l.descricao)}</span><span class="v pos num">${fmtBRL(Number(l.valor))}</span></div>`).join('') || '<div class="line-item"><span>—</span><span></span></div>'}
+          <div class="subtotal"><span>Total de proventos</span><span class="num">${fmtBRL(totalP)}</span></div>
+        </div>
+        <div>
+          <div class="col-title">DESCONTOS</div>
+          ${descontos.map(l=>`<div class="line-item"><span>${escapeHtml(l.descricao)}</span><span class="v neg num">${fmtBRL(Number(l.valor))}</span></div>`).join('') || '<div class="line-item"><span>—</span><span></span></div>'}
+          <div class="subtotal"><span>Total de descontos</span><span class="num">${fmtBRL(totalD)}</span></div>
+        </div>
+      </div>
+      <div class="liquido"><span>LÍQUIDO A RECEBER</span><span class="amt">R$ ${fmtBRL(totalP-totalD)}</span></div>
+    </div>
+  ` : '<p class="sub" style="text-align:left">Nenhum contracheque disponível ainda pra esse colaborador.</p>';
+
+  const sel = document.getElementById('adminPeriodSelect');
+  if(sel) sel.onchange = e => renderAdminSlip(data, e.target.value);
+}
+
+let pdfDraft = null;
+
+function renderPdfReview(result){
+  document.getElementById('cardReviewPdf').style.display = 'block';
+  pdfDraft = result;
+  document.getElementById('pdfPeriodo').value = result.periodo || '';
+  renderPdfEmployeesArea();
+}
+
+function renderPdfEmployeesArea(){
+  const area = document.getElementById('pdfEmployeesArea');
+  area.innerHTML = pdfDraft.funcionarios.map((f, fi) => `
+    <div style="border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-top:14px;">
+      <div class="row" style="margin-bottom:10px;">
+        <div><label>Nome</label><input type="text" data-fi="${fi}" class="pdfNome" value="${escapeHtml(f.nome)}"></div>
+        <div><label>Matrícula</label><input type="text" data-fi="${fi}" class="pdfMatricula" value="${escapeHtml(f.matricula)}"></div>
+      </div>
+      <table>
+        <tr><th>Descrição</th><th>Tipo</th><th>Valor</th></tr>
+        ${f.itens.map((it, ii) => `
+          <tr>
+            <td>${escapeHtml(it.descricao)}</td>
+            <td><select data-fi="${fi}" data-ii="${ii}" class="pdfTipo">
+              <option value="provento" ${it.tipo==='provento'?'selected':''}>+ Provento</option>
+              <option value="desconto" ${it.tipo==='desconto'?'selected':''}>&minus; Desconto</option>
+            </select></td>
+            <td class="num">${fmtBRL(it.valor)}</td>
+          </tr>
+        `).join('')}
+      </table>
+    </div>
+  `).join('');
+
+  document.querySelectorAll('.pdfNome').forEach(inp => inp.oninput = e => { pdfDraft.funcionarios[e.target.getAttribute('data-fi')].nome = e.target.value; });
+  document.querySelectorAll('.pdfMatricula').forEach(inp => inp.oninput = e => { pdfDraft.funcionarios[e.target.getAttribute('data-fi')].matricula = e.target.value.trim(); });
+  document.querySelectorAll('.pdfTipo').forEach(sel => sel.onchange = e => { pdfDraft.funcionarios[e.target.getAttribute('data-fi')].itens[e.target.getAttribute('data-ii')].tipo = e.target.value; });
+}
+
+function renderReview(){
+  document.getElementById('cardReview').style.display = 'block';
+  const tbody = document.getElementById('colTableBody');
+  tbody.innerHTML = draft.headers.map(h => {
+    const sample = escapeHtml((draft.rawRows[0]||{})[h] || '');
+    const m = draft.mapping[h];
+    const badge = m.source==='dict' ? '<span class="badge p">⚡ dicionário</span>' : m.source==='ai' ? '<span class="badge ai">🤖 IA</span>' : m.tipo==='revisar' ? '<span class="badge i">revisar</span>' : '';
+    return `<tr>
+      <td><strong>${escapeHtml(h)}</strong>${badge}</td>
+      <td class="num">${sample}</td>
+      <td>
+        <select data-col="${escapeHtml(h)}" class="colType">
+          <option value="ignorar" ${m.tipo==='ignorar'?'selected':''}>Ignorar</option>
+          <option value="nome" ${m.tipo==='nome'?'selected':''}>Nome</option>
+          <option value="matricula" ${m.tipo==='matricula'?'selected':''}>Matrícula</option>
+          <option value="provento" ${m.tipo==='provento'?'selected':''}>+ Provento</option>
+          <option value="desconto" ${m.tipo==='desconto'?'selected':''}>&minus; Desconto</option>
+          <option value="revisar" ${m.tipo==='revisar'?'selected':''}>? Revisar</option>
+        </select>
+      </td>
+    </tr>`;
+  }).join('');
+  document.querySelectorAll('.colType').forEach(sel => {
+    sel.onchange = e => { draft.mapping[e.target.getAttribute('data-col')].tipo = e.target.value; draft.mapping[e.target.getAttribute('data-col')].source='manual'; updateSummary(); };
+  });
+  updateSummary();
+}
+
+function updateSummary(){
+  const pending = Object.values(draft.mapping).filter(m=>m.tipo==='revisar').length;
+  const hasNome = Object.values(draft.mapping).some(m=>m.tipo==='nome');
+  const hasMatricula = Object.values(draft.mapping).some(m=>m.tipo==='matricula');
+  document.getElementById('summaryLine').textContent = `${pending} coluna(s) pendente(s) de revisão. Nome: ${hasNome?'ok':'faltando'} · Matrícula: ${hasMatricula?'ok':'faltando'}`;
+  document.getElementById('btnPush').disabled = pending>0 || !hasNome || !hasMatricula || !draft.period;
+  document.getElementById('btnPush').onclick = async () => {
+    const msg = document.getElementById('pushMsg');
+    msg.innerHTML = '<div class="muted">enviando...</div>';
+    try{
+      const nomeCol = Object.keys(draft.mapping).find(h=>draft.mapping[h].tipo==='nome');
+      const matriculaCol = Object.keys(draft.mapping).find(h=>draft.mapping[h].tipo==='matricula');
+      const valueCols = Object.keys(draft.mapping).filter(h=>['provento','desconto'].includes(draft.mapping[h].tipo));
+      const rows = draft.rawRows.map(r => ({
+        matricula: (r[matriculaCol]||'').trim(), nome: r[nomeCol],
+        items: valueCols.map(h => ({ descricao: h, tipo: draft.mapping[h].tipo, valor: parseBRL(r[h]) })).filter(i => i.valor !== 0)
+      })).filter(r => r.matricula && r.nome);
+      const res = await callApi('admin_push', { secret: adminSecret, period_label: draft.period, rows });
+      if(!res.ok) throw new Error(res.error);
+      msg.innerHTML = `<div class="ok">Período "${escapeHtml(draft.period)}" enviado — ${res.count} colaborador(es) processado(s).</div>`;
+    }catch(e){ msg.innerHTML = `<div class="error">Erro ao enviar: ${escapeHtml(e.message||e)}</div>`; }
+  };
+}
+
+try{
+  renderAuth();
+}catch(bootErr){
+  app.className = '';
+  app.innerHTML = `<div class="error" style="text-align:left;white-space:pre-wrap;">Erro ao carregar a página:\n${escapeHtml(String(bootErr && bootErr.message || bootErr))}\n\nManda um print dessa mensagem pro suporte.</div>`;
+}
+</script>
+</body>
+</html>
