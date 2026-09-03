@@ -92,7 +92,7 @@
 /* ======= CONFIGURAR ANTES DE DISTRIBUIR ======= */
 const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbyl1nm-qU-cj2ucxrtH40q4gZTXcuRrodig8xcANkQXInazRv6dKhjJv7J8zBsjqHyQSQ/exec';
 const COMPANY_NAME = 'Blincast Media';
-const APP_VERSION = 'v19';
+const APP_VERSION = 'v20';
 /* =============================================== */
 
 function ensurePdfJs(){
@@ -180,6 +180,7 @@ async function doLogin(){
   catch(e){ renderAuth('Não consegui falar com o servidor. Confira sua internet e tente de novo.'); return; }
   if(!res.ok){ renderAuth(res.error); return; }
   session = res;
+  slipRevealed = false;
   renderPortal(session.periods[0] ? session.periods[0].id : null);
 }
 
@@ -193,10 +194,13 @@ async function doSignup(){
   catch(e){ renderAuth('Não consegui falar com o servidor. Confira sua internet e tente de novo.'); return; }
   if(!res.ok){ renderAuth(res.error); return; }
   session = res;
+  slipRevealed = false;
   renderPortal(session.periods[0] ? session.periods[0].id : null);
 }
 
 /* ================= PORTAL (colaborador logado) ================= */
+let slipRevealed = false;
+
 function renderPortal(selectedPeriodId){
   app.className = 'wide';
   const opts = session.periods.map(p => `<option value="${p.id}" ${p.id===selectedPeriodId?'selected':''}>${escapeHtml(p.label)}</option>`).join('');
@@ -207,14 +211,7 @@ function renderPortal(selectedPeriodId){
   const totalD = descontos.reduce((a,l)=>a+Number(l.valor),0);
   const periodLabel = (session.periods.find(p=>p.id===selectedPeriodId)||{}).label || '';
 
-  app.innerHTML = `
-    <div style="max-width:860px;margin:0 auto;">
-    <div class="topbar no-print">
-      <div class="who">${escapeHtml(session.nome)}</div>
-      <button class="ghost auto" id="btnLogout">Sair</button>
-    </div>
-    ${session.periods.length ? `<select class="period no-print" id="periodSelect">${opts}</select>` : '<p class="sub" style="text-align:left">Nenhum contracheque disponível ainda.</p>'}
-    ${session.periods.length ? `
+  const slipHtml = slipRevealed ? `
     <div class="slip">
       <div class="slip-head">
         <div class="co">${escapeHtml(COMPANY_NAME)}</div>
@@ -235,13 +232,34 @@ function renderPortal(selectedPeriodId){
       </div>
       <div class="liquido"><span>LÍQUIDO A RECEBER</span><span class="amt">R$ ${fmtBRL(totalP-totalD)}</span></div>
     </div>
-    <div class="no-print" style="margin-top:18px;"><button class="auto" id="btnPrint">Imprimir / salvar como PDF</button></div>
-    ` : ''}
+    <div class="no-print" style="margin-top:18px;display:flex;gap:10px;">
+      <button class="ghost auto" id="btnHideSlip">Ocultar valores</button>
+      <button class="auto" id="btnPrint">Imprimir / salvar como PDF</button>
+    </div>
+  ` : `
+    <div class="slip" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:70px 20px;text-align:center;">
+      <p class="muted" style="margin-bottom:18px;">Por segurança, os valores ficam ocultos até você clicar. Só mostra a tela pra quem for de sua confiança por perto.</p>
+      <button class="auto" id="btnReveal">Mostrar contracheque de ${escapeHtml(periodLabel)}</button>
     </div>
   `;
-  document.getElementById('btnLogout').onclick = () => { session=null; mode='login'; renderAuth(); };
+
+  app.innerHTML = `
+    <div style="max-width:860px;margin:0 auto;">
+    <div class="topbar no-print">
+      <div class="who">${escapeHtml(session.nome)}</div>
+      <button class="ghost auto" id="btnLogout">Sair</button>
+    </div>
+    ${session.periods.length ? `<select class="period no-print" id="periodSelect">${opts}</select>` : '<p class="sub" style="text-align:left">Nenhum contracheque disponível ainda.</p>'}
+    ${session.periods.length ? slipHtml : ''}
+    </div>
+  `;
+  document.getElementById('btnLogout').onclick = () => { session=null; slipRevealed=false; mode='login'; renderAuth(); };
   const sel = document.getElementById('periodSelect');
-  if(sel) sel.onchange = e => renderPortal(e.target.value);
+  if(sel) sel.onchange = e => { slipRevealed=false; renderPortal(e.target.value); };
+  const btnReveal = document.getElementById('btnReveal');
+  if(btnReveal) btnReveal.onclick = () => { slipRevealed=true; renderPortal(selectedPeriodId); };
+  const btnHide = document.getElementById('btnHideSlip');
+  if(btnHide) btnHide.onclick = () => { slipRevealed=false; renderPortal(selectedPeriodId); };
   const pb = document.getElementById('btnPrint');
   if(pb) pb.onclick = () => window.print();
 }
@@ -434,23 +452,7 @@ function renderAdmin(){
     </div>
 
     <div class="card">
-      <h2>1. Cadastrar colaboradores</h2>
-      <p class="hint">Cadastro individual (nome + matrícula) ou importação em massa colando uma lista. Isso libera o "primeiro acesso" antes mesmo da folha chegar. A matrícula é o mesmo número que aparece como "Código" no holerite.${isRh ? '' : ' Só matrículas do setor operacional podem ser cadastradas por aqui.'}</p>
-      <div class="row">
-        <div><label>Nome completo</label><input type="text" id="newEmpNome" placeholder="Ex: João da Silva"></div>
-        <div><label>Matrícula</label><input type="text" id="newEmpMatricula" placeholder="Ex: 78"></div>
-      </div>
-      <button class="auto" id="btnAddEmp">Cadastrar colaborador</button>
-      <div id="addEmpMsg"></div>
-      <hr style="border:none;border-top:1px solid var(--line-soft);margin:18px 0;">
-      <label>Importar lista (uma linha por pessoa — nome, e a matrícula na última coluna; colunas do meio são ignoradas)</label>
-      <textarea id="bulkImportInput" placeholder="Nome Completo	cargo (opcional)	78"></textarea>
-      <div style="margin-top:14px;"><button class="ghost auto" id="btnBulkImport">Importar lista</button></div>
-      <div id="bulkImportMsg"></div>
-    </div>
-
-    <div class="card">
-      <h2>2. Enviar a folha do mês</h2>
+      <h2>1. Enviar a folha do mês</h2>
       <p class="hint">Cole os dados direto do Excel/Sheets, ou anexe um arquivo .xlsx/.xls/.csv. Se sua folha só existir em PDF, me manda o PDF na nossa conversa que eu transcrevo pra um formato que cola aqui.${isRh ? '' : ' Linhas de matrículas fora do setor operacional são ignoradas automaticamente.'}</p>
       <div class="row">
         <div><label>Referência do período</label><input type="text" id="period" placeholder="Ex: Agosto/2026"></div>
@@ -463,7 +465,7 @@ function renderAdmin(){
     </div>
 
     <div class="card" id="cardReviewPdf" style="display:none;">
-      <h2>3. Conferência rápida (PDF)</h2>
+      <h2>2. Conferência rápida (PDF)</h2>
       <p class="hint">Nome, matrícula e período lidos direto do PDF — confira os itens antes de enviar. Se um item veio classificado errado (provento/desconto), corrige no menu.</p>
       <div class="row"><div><label>Período detectado</label><input type="text" id="pdfPeriodo"></div></div>
       <div id="pdfEmployeesArea"></div>
@@ -472,7 +474,7 @@ function renderAdmin(){
     </div>
 
     <div class="card" id="cardReview" style="display:none;">
-      <h2>3. Conferência rápida</h2>
+      <h2>2. Conferência rápida</h2>
       <p class="hint">Classificação automática por dicionário de termos de folha (⚡). Colunas não reconhecidas ficam marcadas como "revisar" — escolha manualmente no menu.</p>
       <table><tr><th>Coluna</th><th>Amostra</th><th>Classificação</th></tr><tbody id="colTableBody"></tbody></table>
       <hr style="border:none;border-top:1px solid var(--line-soft);margin:18px 0;">
@@ -482,7 +484,7 @@ function renderAdmin(){
     </div>
 
     <div class="card">
-      <h2>4. Ver contracheques dos colaboradores</h2>
+      <h2>3. Ver contracheques dos colaboradores</h2>
       <p class="hint">Escolha um colaborador pra ver os contracheques dele (últimos 12 meses), do mesmo jeito que ele vê.${isRh ? '' : ' Só aparecem os colaboradores do setor operacional.'}</p>
       <div class="row">
         <div><label>Colaborador</label><select id="empSelect"><option value="">Carregando...</option></select></div>
@@ -492,14 +494,40 @@ function renderAdmin(){
 
     ${isRh ? `
     <div class="card">
-      <h2>5. Manter só o setor operacional</h2>
+      <h2>4. Manter só o setor operacional</h2>
       <p class="hint">Se alguém subir a folha da empresa toda aqui (todos os setores), use isto pra ver quem não faz parte da lista de matrículas do operacional e removê-los desta plataforma — a lista de matrículas permitidas fica na aba "SetorOperacional" da planilha, você edita direto lá se precisar adicionar ou tirar alguém.</p>
       <button class="ghost auto" id="btnPreviewCleanup">Ver quem seria removido</button>
       <div id="cleanupArea"></div>
     </div>
     ` : ''}
+
+    <div class="card">
+      <h2 style="cursor:pointer;user-select:none;" id="toggleCadastro">Cadastrar colaboradores <span class="muted" style="font-weight:400;">(uso ocasional — clique pra abrir)</span> <span id="toggleCadastroIcon">▸</span></h2>
+      <div id="cadastroBody" style="display:none;margin-top:16px;">
+        <p class="hint">Cadastro individual (nome + matrícula) ou importação em massa colando uma lista. Isso libera o "primeiro acesso" antes mesmo da folha chegar. A matrícula é o mesmo número que aparece como "Código" no holerite.${isRh ? '' : ' Só matrículas do setor operacional podem ser cadastradas por aqui.'}</p>
+        <div class="row">
+          <div><label>Nome completo</label><input type="text" id="newEmpNome" placeholder="Ex: João da Silva"></div>
+          <div><label>Matrícula</label><input type="text" id="newEmpMatricula" placeholder="Ex: 78"></div>
+        </div>
+        <button class="auto" id="btnAddEmp">Cadastrar colaborador</button>
+        <div id="addEmpMsg"></div>
+        <hr style="border:none;border-top:1px solid var(--line-soft);margin:18px 0;">
+        <label>Importar lista (uma linha por pessoa — nome, e a matrícula na última coluna; colunas do meio são ignoradas)</label>
+        <textarea id="bulkImportInput" placeholder="Nome Completo	cargo (opcional)	78"></textarea>
+        <div style="margin-top:14px;"><button class="ghost auto" id="btnBulkImport">Importar lista</button></div>
+        <div id="bulkImportMsg"></div>
+      </div>
+    </div>
   `;
   document.getElementById('btnAdminExit').onclick = () => { mode='login'; renderAuth(); };
+
+  document.getElementById('toggleCadastro').onclick = () => {
+    const body = document.getElementById('cadastroBody');
+    const icon = document.getElementById('toggleCadastroIcon');
+    const open = body.style.display !== 'none';
+    body.style.display = open ? 'none' : 'block';
+    icon.textContent = open ? '▸' : '▾';
+  };
 
   document.getElementById('btnAddEmp').onclick = async () => {
     const nome = document.getElementById('newEmpNome').value.trim();
